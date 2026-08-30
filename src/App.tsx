@@ -150,47 +150,53 @@ export function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         
         {/* Quick Intelligence Metric Strip (Directly synced with live ESPN & Open-Meteo) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="glass-panel p-3 rounded-2xl flex items-center gap-3 border-emerald-500/20">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          
+          {/* Vegas Total - Gold Accent */}
+          <div className="p-4 rounded-3xl bg-gradient-to-br from-amber-950/40 via-slate-900/90 to-slate-950 border border-amber-500/40 shadow-lg shadow-amber-500/5 flex items-center gap-3.5 ring-1 ring-amber-500/20">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-inner">
+              <DollarSign className="w-5 h-5 text-amber-400" />
             </div>
             <div>
-              <div className="text-[10px] font-mono text-slate-400 uppercase">Top Live Vegas Total</div>
-              <div className="text-xs font-bold text-white font-mono">{topVegasTotal.matchup} ({topVegasTotal.total} O/U)</div>
+              <div className="text-xs font-mono text-amber-300/90 uppercase font-bold tracking-wider">Top Vegas Total</div>
+              <div className="text-sm sm:text-base font-extrabold text-white font-display mt-0.5">{topVegasTotal.matchup} ({topVegasTotal.total} O/U)</div>
             </div>
           </div>
 
-          <div className="glass-panel p-3 rounded-2xl flex items-center gap-3 border-indigo-500/20">
-            <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-              <Flame className="w-4 h-4 text-indigo-400" />
+          {/* TD Prop - Crimson/Coral Accent */}
+          <div className="p-4 rounded-3xl bg-gradient-to-br from-rose-950/40 via-slate-900/90 to-slate-950 border border-rose-500/40 shadow-lg shadow-rose-500/5 flex items-center gap-3.5 ring-1 ring-rose-500/20">
+            <div className="w-11 h-11 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center shrink-0 shadow-inner">
+              <Flame className="w-5 h-5 text-rose-400" />
             </div>
             <div>
-              <div className="text-[10px] font-mono text-slate-400 uppercase">Top TD Prop Line</div>
-              <div className="text-xs font-bold text-white font-mono">Saquon Barkley (-165)</div>
+              <div className="text-xs font-mono text-rose-300/90 uppercase font-bold tracking-wider">Top TD Prop Line</div>
+              <div className="text-sm sm:text-base font-extrabold text-white font-display mt-0.5">Saquon Barkley (-165)</div>
             </div>
           </div>
 
-          <div className="glass-panel p-3 rounded-2xl flex items-center gap-3 border-amber-500/20">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
-              <TrendingUp className="w-4 h-4 text-amber-400" />
+          {/* Waiver Target - Purple Accent */}
+          <div className="p-4 rounded-3xl bg-gradient-to-br from-purple-950/40 via-slate-900/90 to-slate-950 border border-purple-500/40 shadow-lg shadow-purple-500/5 flex items-center gap-3.5 ring-1 ring-purple-500/20">
+            <div className="w-11 h-11 rounded-2xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0 shadow-inner">
+              <TrendingUp className="w-5 h-5 text-purple-400" />
             </div>
             <div>
-              <div className="text-[10px] font-mono text-slate-400 uppercase">Top Waiver Target</div>
-              <div className="text-xs font-bold text-white font-mono">Tyrone Tracy (45% FAAB)</div>
+              <div className="text-xs font-mono text-purple-300/90 uppercase font-bold tracking-wider">Top Waiver Target</div>
+              <div className="text-sm sm:text-base font-extrabold text-white font-display mt-0.5">Tyrone Tracy (45% FAAB)</div>
             </div>
           </div>
 
-          <div className="glass-panel p-3 rounded-2xl flex items-center gap-3 border-rose-500/20">
-            <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center shrink-0">
-              <Wind className="w-4 h-4 text-rose-400" />
+          {/* Weather Warning - Cyan Accent */}
+          <div className="p-4 rounded-3xl bg-gradient-to-br from-cyan-950/40 via-slate-900/90 to-slate-950 border border-cyan-500/40 shadow-lg shadow-cyan-500/5 flex items-center gap-3.5 ring-1 ring-cyan-500/20">
+            <div className="w-11 h-11 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shrink-0 shadow-inner">
+              <Wind className="w-5 h-5 text-cyan-400" />
             </div>
             <div>
-              <div className="text-[10px] font-mono text-slate-400 uppercase">Live Weather Warning</div>
-              <div className="text-xs font-bold text-white font-mono">Arrowhead (12.2mph Wind)</div>
+              <div className="text-xs font-mono text-cyan-300/90 uppercase font-bold tracking-wider">Live Weather Alert</div>
+              <div className="text-sm sm:text-base font-extrabold text-white font-display mt-0.5">Arrowhead (12.2mph Wind)</div>
             </div>
           </div>
         </div>
+
 
         {/* Dynamic Tab Body */}
         {activeTab === 'war-room' && (

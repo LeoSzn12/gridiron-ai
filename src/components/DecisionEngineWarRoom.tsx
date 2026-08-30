@@ -301,27 +301,27 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
                 <div
                   key={dec.playerId}
                   onClick={() => originalPlayer && onSelectPlayerDetail(originalPlayer)}
-                  className={`p-5 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] relative group ${
+                  className={`p-6 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] relative group shadow-xl ${
                     dec.recommendationTier === 'SMASH_START'
-                      ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900/90 to-slate-950 border-emerald-500/50 ring-1 ring-emerald-500/20'
+                      ? 'bg-gradient-to-br from-amber-950/30 via-slate-900/95 to-slate-950 border-amber-500/50 ring-1 ring-amber-500/30 shadow-amber-500/10'
                       : dec.recommendationTier === 'STRONG_START'
-                      ? 'bg-slate-900/80 border-slate-700'
-                      : 'glass-panel border-slate-800'
+                      ? 'bg-gradient-to-br from-purple-950/30 via-slate-900/95 to-slate-950 border-purple-500/50 ring-1 ring-purple-500/30 shadow-purple-500/10'
+                      : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
                   }`}
                 >
                   {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
                       {originalPlayer?.avatar && (
-                        <img src={originalPlayer.avatar} alt={dec.playerName} className="w-10 h-10 rounded-2xl object-cover" />
+                        <img src={originalPlayer.avatar} alt={dec.playerName} className="w-12 h-12 rounded-2xl object-cover border border-slate-700 shadow-md" />
                       )}
                       <div>
-                        <div className="font-bold text-white text-sm">{dec.playerName}</div>
-                        <div className="text-xs font-mono text-slate-400">{dec.position} • {dec.team} vs {dec.opponent}</div>
+                        <div className="font-extrabold text-white text-base sm:text-lg font-display tracking-tight">{dec.playerName}</div>
+                        <div className="text-xs font-mono text-slate-300 font-semibold mt-0.5">{dec.position} • {dec.team} vs {dec.opponent}</div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       {/* Pin Button */}
                       {onPinPlayer && originalPlayer && (
                         <button
@@ -329,71 +329,71 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
                             e.stopPropagation();
                             onPinPlayer(originalPlayer);
                           }}
-                          className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
+                          className={`p-2 rounded-xl border transition-all cursor-pointer ${
                             isPinned
-                              ? 'bg-emerald-500/30 border-emerald-500 text-emerald-300'
-                              : 'bg-slate-900/80 border-slate-800 text-slate-500 hover:text-white hover:border-slate-700'
+                              ? 'bg-amber-500/30 border-amber-500 text-amber-300 shadow-sm'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
                           }`}
                           title={isPinned ? 'Unpin Player' : 'Pin to Compare'}
                         >
-                          {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                          {isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
                         </button>
                       )}
 
                       {/* Alpha Rating Badge */}
                       <div className="text-right">
-                        <div className="text-2xl font-black font-mono text-emerald-400">{dec.alphaIndex}</div>
-                        <div className="text-[9px] font-mono text-slate-400 uppercase">ALPHA SCORE</div>
+                        <div className="text-3xl font-black font-mono text-amber-400 leading-none">{dec.alphaIndex}</div>
+                        <div className="text-[10px] font-mono text-slate-400 uppercase font-bold mt-0.5">ALPHA SCORE</div>
                       </div>
                     </div>
                   </div>
 
-
-                  {/* Tier Pill */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                      dec.recommendationTier === 'SMASH_START' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
-                      dec.recommendationTier === 'STRONG_START' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' :
-                      'bg-slate-800 text-slate-300'
+                  {/* Tier Pill & Projected Points */}
+                  <div className="flex items-center justify-between text-xs py-1 border-y border-slate-800/80">
+                    <span className={`px-3 py-1 rounded-xl font-mono font-extrabold text-xs ${
+                      dec.recommendationTier === 'SMASH_START' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50' :
+                      dec.recommendationTier === 'STRONG_START' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50' :
+                      dec.recommendationTier === 'VOLATILE_SIT' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50' :
+                      'bg-slate-800 text-slate-300 border border-slate-700'
                     }`}>
                       {dec.recommendationTier.replace('_', ' ')}
                     </span>
-                    <span className="font-mono text-slate-300 text-[11px]">
-                      Proj: <strong className="text-emerald-400">{dec.projectedPoints} pts</strong>
+                    <span className="font-mono text-slate-200 text-xs sm:text-sm">
+                      Proj: <strong className="text-emerald-400 text-sm sm:text-base font-black">{dec.projectedPoints} pts</strong>
                     </span>
                   </div>
 
                   {/* 5 Sub-Score Progress Bars */}
-                  <div className="space-y-1.5 text-[10px] font-mono">
-                    <div className="flex justify-between text-slate-400">
-                      <span>Vegas Line Efficiency</span>
-                      <span className="text-emerald-400 font-bold">{dec.subScores.vegasEfficiency}/100</span>
+                  <div className="space-y-2 text-xs font-mono">
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-amber-300 font-semibold">💵 Vegas Line Efficiency</span>
+                      <span className="text-amber-400 font-bold">{dec.subScores.vegasEfficiency}/100</span>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${dec.subScores.vegasEfficiency}%` }}></div>
-                    </div>
-
-                    <div className="flex justify-between text-slate-400">
-                      <span>Matchup & DvP Advantage</span>
-                      <span className="text-indigo-400 font-bold">{dec.subScores.matchupAdvantage}/100</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${dec.subScores.matchupAdvantage}%` }}></div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full" style={{ width: `${dec.subScores.vegasEfficiency}%` }}></div>
                     </div>
 
-                    <div className="flex justify-between text-slate-400">
-                      <span>Weather Environmental Factor</span>
-                      <span className="text-sky-400 font-bold">{dec.subScores.weatherConditions}/100</span>
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-purple-300 font-semibold">🛡️ Matchup & DvP Advantage</span>
+                      <span className="text-purple-400 font-bold">{dec.subScores.matchupAdvantage}/100</span>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-sky-500 rounded-full" style={{ width: `${dec.subScores.weatherConditions}%` }}></div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 rounded-full" style={{ width: `${dec.subScores.matchupAdvantage}%` }}></div>
+                    </div>
+
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-cyan-300 font-semibold">🌪️ Weather & Venue Factor</span>
+                      <span className="text-cyan-400 font-bold">{dec.subScores.weatherConditions}/100</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-cyan-500 to-sky-400 rounded-full" style={{ width: `${dec.subScores.weatherConditions}%` }}></div>
                     </div>
                   </div>
 
                   {/* Key Tactical Driver */}
-                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[11px] text-slate-300">
-                    <span className="text-emerald-400 font-bold">✓ </span>
-                    <span>{dec.keyPositiveFactors[0]}</span>
+                  <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-200 flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold text-sm">✓</span>
+                    <span className="leading-relaxed">{dec.keyPositiveFactors[0]}</span>
                   </div>
                 </div>
               );
@@ -401,6 +401,7 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
           </div>
         </div>
       )}
+
 
       {/* 2. AI Duel Arbiter Tab */}
       {activeTab === 'duel-arbitration' && (
