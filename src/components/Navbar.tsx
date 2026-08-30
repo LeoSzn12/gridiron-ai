@@ -28,6 +28,7 @@ interface NavbarProps {
   liveGames?: LiveNFLGameScore[];
   onOpenLeagueSettings: () => void;
   onOpenLiveDataHub: () => void;
+  onOpenCommandPalette?: () => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
 }
@@ -39,9 +40,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   liveGames = [],
   onOpenLeagueSettings,
   onOpenLiveDataHub,
+  onOpenCommandPalette,
   searchQuery,
-  setSearchQuery,
+  setSearchQuery: _setSearchQuery,
 }) => {
+
+
   const tabs = [
     { id: 'war-room', label: 'Decision War Room', icon: BrainCircuit, badge: '5-Factor AI' },
     { id: 'draft-room', label: 'AI Draft Room', icon: Trophy, badge: '3-QB VORP' },
@@ -165,26 +169,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative w-full md:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          {/* Omnibar & Search Bar */}
+          <div 
+            onClick={onOpenCommandPalette}
+            className="relative w-full md:w-72 cursor-pointer group"
+          >
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-hover:text-emerald-400 transition-colors" />
             <input
               type="text"
-              placeholder="Search players, teams, matchups..."
+              readOnly
+              placeholder="Search or press ⌘K..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs bg-slate-900/90 border border-slate-800/90 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/80 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+              className="w-full pl-9 pr-14 py-1.5 text-xs bg-slate-900/90 border border-slate-800/90 group-hover:border-emerald-500/50 rounded-xl text-slate-200 placeholder-slate-500 cursor-pointer focus:outline-none transition-all shadow-sm"
             />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-              >
-                ✕
-              </button>
-            )}
+            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-md bg-slate-800/90 border border-slate-700 text-[10px] font-mono text-slate-400 group-hover:text-emerald-300 transition-colors">
+              ⌘K
+            </span>
           </div>
         </div>
+
 
         {/* Tab Navigation */}
         <div className="flex items-center gap-2 mt-3 pt-2 border-t border-slate-800/60 overflow-x-auto pb-1">

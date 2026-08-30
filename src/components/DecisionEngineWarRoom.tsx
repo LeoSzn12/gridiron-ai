@@ -11,21 +11,27 @@ import {
   Wind, 
   ShieldCheck, 
   Flame, 
-  Award 
+  Award,
+  Pin,
+  PinOff 
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 
+import confetti from 'canvas-confetti';
 
 interface DecisionEngineWarRoomProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  onPinPlayer?: (player: Player) => void;
+  pinnedPlayerIds?: string[];
 }
 
 export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  onPinPlayer,
+  pinnedPlayerIds = [],
 }) => {
   // Weights State
   const [weights, setWeights] = useState<DecisionFactorWeights>({
@@ -39,13 +45,22 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   const [selectedPlayerAId, setSelectedPlayerAId] = useState<string>(players[0]?.id || 'lamar-jackson');
   const [selectedPlayerBId, setSelectedPlayerBId] = useState<string>(players[1]?.id || 'jayden-daniels');
   const [activeTab, setActiveTab] = useState<'decision-matrix' | 'duel-arbitration' | 'sportsbook-compare'>('decision-matrix');
+  const [positionFilter, setPositionFilter] = useState<string>('ALL');
 
   // Compute decisions for all players
   const playerDecisions: PlayerCompositeDecision[] = useMemo(() => {
     return players
       .map(p => calculateCompositeDecision(p, settings, weights))
+      .filter(d => {
+        if (positionFilter === 'ALL') return true;
+        if (positionFilter === 'SMASH') return d.alphaIndex >= 85;
+        if (positionFilter === 'SIT') return d.alphaIndex < 68;
+        if (positionFilter === 'IDP') return d.position === 'DL' || d.position === 'LB' || d.position === 'DB';
+        return d.position === positionFilter;
+      })
       .sort((a, b) => b.alphaIndex - a.alphaIndex);
-  }, [players, settings, weights]);
+  }, [players, settings, weights, positionFilter]);
+
 
   // Selected duel players
   const playerA = players.find(p => p.id === selectedPlayerAId) || players[0];
@@ -244,22 +259,49 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
       {/* 1. Alpha Index Decision Board */}
       {activeTab === 'decision-matrix' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>Ranked Composite Decision Board ({playerDecisions.length} Players Evaluated)</span>
+              <span>Ranked Composite Decision Board ({playerDecisions.length} Players)</span>
             </h3>
-            <span className="text-xs font-mono text-slate-400">Live Scored via Active Weights</span>
+
+            {/* Quick Position & Tier Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+              {[
+                { id: 'ALL', label: 'All' },
+                { id: 'QB', label: 'QB (3-QB)' },
+                { id: 'RB', label: 'RB' },
+                { id: 'WR', label: 'WR (5-WR)' },
+                { id: 'TE', label: 'TE' },
+                { id: 'IDP', label: 'IDP' },
+                { id: 'SMASH', label: '🔥 Smash Starts' },
+                { id: 'SIT', label: '⚠️ Volatile Sits' },
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setPositionFilter(f.id)}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    positionFilter === f.id
+                      ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {playerDecisions.map((dec) => {
               const originalPlayer = players.find(p => p.id === dec.playerId);
+              const isPinned = pinnedPlayerIds.includes(dec.playerId);
+
               return (
                 <div
                   key={dec.playerId}
                   onClick={() => originalPlayer && onSelectPlayerDetail(originalPlayer)}
-                  className={`p-5 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] ${
+                  className={`p-5 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] relative group ${
                     dec.recommendationTier === 'SMASH_START'
                       ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900/90 to-slate-950 border-emerald-500/50 ring-1 ring-emerald-500/20'
                       : dec.recommendationTier === 'STRONG_START'
@@ -279,12 +321,33 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
                       </div>
                     </div>
 
-                    {/* Alpha Rating Badge */}
-                    <div className="text-right">
-                      <div className="text-2xl font-black font-mono text-emerald-400">{dec.alphaIndex}</div>
-                      <div className="text-[9px] font-mono text-slate-400 uppercase">ALPHA SCORE</div>
+                    <div className="flex items-center gap-2">
+                      {/* Pin Button */}
+                      {onPinPlayer && originalPlayer && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPinPlayer(originalPlayer);
+                          }}
+                          className={`p-1.5 rounded-xl border transition-all cursor-pointer ${
+                            isPinned
+                              ? 'bg-emerald-500/30 border-emerald-500 text-emerald-300'
+                              : 'bg-slate-900/80 border-slate-800 text-slate-500 hover:text-white hover:border-slate-700'
+                          }`}
+                          title={isPinned ? 'Unpin Player' : 'Pin to Compare'}
+                        >
+                          {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+
+                      {/* Alpha Rating Badge */}
+                      <div className="text-right">
+                        <div className="text-2xl font-black font-mono text-emerald-400">{dec.alphaIndex}</div>
+                        <div className="text-[9px] font-mono text-slate-400 uppercase">ALPHA SCORE</div>
+                      </div>
                     </div>
                   </div>
+
 
                   {/* Tier Pill */}
                   <div className="flex items-center justify-between text-xs">

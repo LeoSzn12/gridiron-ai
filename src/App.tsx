@@ -23,6 +23,8 @@ import { AdvancedMetricsLab } from './components/AdvancedMetricsLab';
 import { WeatherRadarHub } from './components/WeatherRadarHub';
 import { AIAudioBriefing } from './components/AIAudioBriefing';
 import { LiveDataHubModal } from './components/LiveDataHubModal';
+import { CommandPaletteModal } from './components/CommandPaletteModal';
+import { FloatingComparisonDock } from './components/FloatingComparisonDock';
 import { 
   Flame, 
   Wind, 
@@ -35,10 +37,25 @@ export function App() {
   const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(LEO_SZN_YAHOO_PRESET);
   const [isLeagueSettingsOpen, setIsLeagueSettingsOpen] = useState<boolean>(false);
   const [isLiveDataHubOpen, setIsLiveDataHubOpen] = useState<boolean>(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [pinnedPlayers, setPinnedPlayers] = useState<Player[]>([]);
   const [playersList, setPlayersList] = useState<Player[]>(PLAYERS_DATABASE);
   const [liveScores, setLiveScores] = useState<LiveNFLGameScore[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<Player | null>(null);
+
+  // Global ⌘K Keyboard Shortcut Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Auto-sync real-time weather & live ESPN NFL scoreboard data on initial mount
   useEffect(() => {
@@ -78,6 +95,29 @@ export function App() {
     };
   }, [liveScores]);
 
+  // Pinned player management
+  const handlePinPlayer = (player: Player) => {
+    setPinnedPlayers(prev => {
+      if (prev.some(p => p.id === player.id)) {
+        return prev.filter(p => p.id !== player.id);
+      }
+      if (prev.length >= 3) {
+        return [...prev.slice(1), player];
+      }
+      return [...prev, player];
+    });
+  };
+
+  const handleRemovePinned = (playerId: string) => {
+    setPinnedPlayers(prev => prev.filter(p => p.id !== playerId));
+  };
+
+  const handleLaunchDuelFromDock = (playerA: Player, _playerB: Player) => {
+    setActiveTab('war-room');
+    setSelectedPlayerDetail(playerA);
+  };
+
+
   // Filter players by search query if any
   const filteredPlayers = useMemo(() => {
     if (!searchQuery.trim()) return playersList;
@@ -91,7 +131,7 @@ export function App() {
   }, [searchQuery, playersList]);
 
   return (
-    <div className="min-h-screen bg-[#060913] text-slate-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-300">
+    <div className="min-h-screen bg-[#060913] text-slate-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-300 relative">
       
       {/* Navigation Header with Live ESPN Week 1 Scoreboard */}
       <Navbar
@@ -101,6 +141,7 @@ export function App() {
         liveGames={liveScores}
         onOpenLeagueSettings={() => setIsLeagueSettingsOpen(true)}
         onOpenLiveDataHub={() => setIsLiveDataHubOpen(true)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
@@ -157,6 +198,8 @@ export function App() {
             players={filteredPlayers}
             settings={leagueSettings}
             onSelectPlayerDetail={(p) => setSelectedPlayerDetail(p)}
+            onPinPlayer={handlePinPlayer}
+            pinnedPlayerIds={pinnedPlayers.map(p => p.id)}
           />
         )}
 
@@ -252,6 +295,27 @@ export function App() {
           />
         )}
       </main>
+
+      {/* Floating Comparison Drawer Dock */}
+      <FloatingComparisonDock
+        pinnedPlayers={pinnedPlayers}
+        onRemovePinned={handleRemovePinned}
+        onClearAll={() => setPinnedPlayers([])}
+        onOpenDetailedDuel={handleLaunchDuelFromDock}
+        settings={leagueSettings}
+      />
+
+      {/* Global ⌘K Command Palette Omnibar Modal */}
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        players={playersList}
+        settings={leagueSettings}
+        onSelectTab={(tabId) => setActiveTab(tabId)}
+        onSelectPlayer={(player) => setSelectedPlayerDetail(player)}
+        onOpenLeagueSettings={() => setIsLeagueSettingsOpen(true)}
+        onOpenLiveDataHub={() => setIsLiveDataHubOpen(true)}
+      />
 
       {/* Deep-Dive Player Intelligence Modal */}
       <PlayerModal
