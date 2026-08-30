@@ -1,10 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import type { Player, LeagueSettings, DecisionFactorWeights, PlayerCompositeDecision } from '../types';
-import { calculateCompositeDecision, compareMultiSportsbookOdds } from '../services/aiEngine';
+import { calculateCompositeDecision, compareMultiSportsbookOdds, calculateProjection } from '../services/aiEngine';
 import { 
   BrainCircuit, 
   Sliders, 
-  Sparkles, 
   CheckCircle2, 
   RotateCcw, 
   DollarSign, 
@@ -26,6 +25,8 @@ interface DecisionEngineWarRoomProps {
   pinnedPlayerIds?: string[];
 }
 
+import { PlayerFilterBar, type PlayerFilterState } from './PlayerFilterBar';
+
 export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   players,
   settings,
@@ -45,21 +46,96 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   const [selectedPlayerAId, setSelectedPlayerAId] = useState<string>(players[0]?.id || 'lamar-jackson');
   const [selectedPlayerBId, setSelectedPlayerBId] = useState<string>(players[1]?.id || 'jayden-daniels');
   const [activeTab, setActiveTab] = useState<'decision-matrix' | 'duel-arbitration' | 'sportsbook-compare'>('decision-matrix');
-  const [positionFilter, setPositionFilter] = useState<string>('ALL');
+  
+  const [filterState, setFilterState] = useState<PlayerFilterState>({
+    searchQuery: '',
+    position: 'ALL',
+    team: 'ALL',
+    category: 'ALL',
+    sortBy: 'ALPHA',
+    sortAscending: false,
+  });
 
   // Compute decisions for all players
   const playerDecisions: PlayerCompositeDecision[] = useMemo(() => {
     return players
       .map(p => calculateCompositeDecision(p, settings, weights))
       .filter(d => {
-        if (positionFilter === 'ALL') return true;
-        if (positionFilter === 'SMASH') return d.alphaIndex >= 85;
-        if (positionFilter === 'SIT') return d.alphaIndex < 68;
-        if (positionFilter === 'IDP') return d.position === 'DL' || d.position === 'LB' || d.position === 'DB';
-        return d.position === positionFilter;
+        const originalPlayer = players.find(p => p.id === d.playerId);
+        if (!originalPlayer) return false;
+
+        // Search text
+        if (filterState.searchQuery.trim()) {
+          const q = filterState.searchQuery.toLowerCase().trim();
+          const matchName = d.playerName.toLowerCase().includes(q);
+          const matchTeam = d.team.toLowerCase().includes(q);
+          const matchPos = d.position.toLowerCase() === q;
+          if (!matchName && !matchTeam && !matchPos) return false;
+        }
+
+        // Team filter
+        if (filterState.team !== 'ALL' && d.team !== filterState.team) {
+          return false;
+        }
+
+        // Position filter
+        if (filterState.position !== 'ALL') {
+          if (filterState.position === 'IDP') {
+            if (!['DL', 'LB', 'DB'].includes(d.position)) return false;
+          } else if (d.position !== filterState.position) {
+            return false;
+          }
+        }
+
+        // Category filter
+        if (filterState.category === 'SMASH' && d.alphaIndex < 85) return false;
+        if (filterState.category === 'SIT' && d.alphaIndex >= 68) return false;
+        if (filterState.category === 'INJURED' && originalPlayer.injuryStatus === 'HEALTHY') return false;
+        if (filterState.category === 'DOME' && !originalPlayer.weather.isDome) return false;
+        if (filterState.category === 'WAIVER' && !originalPlayer.isWaiverTarget) return false;
+
+        return true;
       })
-      .sort((a, b) => b.alphaIndex - a.alphaIndex);
-  }, [players, settings, weights, positionFilter]);
+      .sort((a, b) => {
+        const pA = players.find(p => p.id === a.playerId)!;
+        const pB = players.find(p => p.id === b.playerId)!;
+
+        let diff = 0;
+        switch (filterState.sortBy) {
+          case 'ALPHA':
+            diff = b.alphaIndex - a.alphaIndex;
+            break;
+          case 'PROJECTION':
+            diff = b.projectedPoints - a.projectedPoints;
+            break;
+          case 'VORP': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.vorpValue - prA.vorpValue;
+            break;
+          }
+          case 'VEGAS':
+            diff = (pB.vegas?.impliedTeamTotal || 0) - (pA.vegas?.impliedTeamTotal || 0);
+            break;
+          case 'TRADE_VALUE':
+            diff = (pB.tradeValue || 0) - (pA.tradeValue || 0);
+            break;
+          case 'CEILING': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.ceiling - prA.ceiling;
+            break;
+          }
+          case 'FLOOR': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.floor - prA.floor;
+            break;
+          }
+        }
+        return filterState.sortAscending ? -diff : diff;
+      });
+  }, [players, settings, weights, filterState]);
 
 
   // Selected duel players
@@ -259,38 +335,12 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
       {/* 1. Alpha Index Decision Board */}
       {activeTab === 'decision-matrix' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>Ranked Composite Decision Board ({playerDecisions.length} Players)</span>
-            </h3>
-
-            {/* Quick Position & Tier Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-              {[
-                { id: 'ALL', label: 'All' },
-                { id: 'QB', label: 'QB (3-QB)' },
-                { id: 'RB', label: 'RB' },
-                { id: 'WR', label: 'WR (5-WR)' },
-                { id: 'TE', label: 'TE' },
-                { id: 'IDP', label: 'IDP' },
-                { id: 'SMASH', label: '🔥 Smash Starts' },
-                { id: 'SIT', label: '⚠️ Volatile Sits' },
-              ].map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => setPositionFilter(f.id)}
-                  className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                    positionFilter === f.id
-                      ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
-                      : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <PlayerFilterBar
+            filters={filterState}
+            onFilterChange={setFilterState}
+            totalPlayersCount={players.length}
+            filteredCount={playerDecisions.length}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {playerDecisions.map((dec) => {

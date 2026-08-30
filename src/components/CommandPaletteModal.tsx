@@ -20,6 +20,7 @@ import {
   ArrowRight,
   User
 } from 'lucide-react';
+import { searchPlayers } from '../utils/searchUtils';
 
 interface CommandPaletteModalProps {
   isOpen: boolean;
@@ -68,22 +69,20 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     { id: 'action-settings', label: 'Configure Custom League Scoring & 3-QB Roster Settings', icon: Sliders, action: onOpenLeagueSettings },
   ];
 
+  // Focus input when modal opens
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      setQuery('');
-      setSelectedIndex(0);
+      const timer = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
   // Filter items
   const q = query.toLowerCase().trim();
 
-  const filteredPlayers = players.filter(p => 
-    p.name.toLowerCase().includes(q) || 
-    p.team.toLowerCase().includes(q) || 
-    p.position.toLowerCase() === q
-  ).slice(0, 5);
+  const filteredPlayers = query.trim() 
+    ? searchPlayers(players, query, 6)
+    : players.slice(0, 5);
 
   const filteredTools = tools.filter(t => 
     t.label.toLowerCase().includes(q) || 
@@ -95,6 +94,28 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   );
 
   const totalResultsCount = filteredPlayers.length + filteredTools.length + filteredActions.length;
+
+  const executeSelectedItem = React.useCallback(() => {
+    if (selectedIndex < filteredPlayers.length) {
+      const player = filteredPlayers[selectedIndex];
+      if (player) {
+        onSelectPlayer(player);
+        onClose();
+      }
+    } else if (selectedIndex < filteredPlayers.length + filteredTools.length) {
+      const tool = filteredTools[selectedIndex - filteredPlayers.length];
+      if (tool) {
+        onSelectTab(tool.id);
+        onClose();
+      }
+    } else {
+      const action = filteredActions[selectedIndex - filteredPlayers.length - filteredTools.length];
+      if (action) {
+        action.action();
+        onClose();
+      }
+    }
+  }, [selectedIndex, filteredPlayers, filteredTools, filteredActions, onSelectPlayer, onSelectTab, onClose]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -118,29 +139,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, selectedIndex, totalResultsCount, filteredPlayers, filteredTools, filteredActions]);
-
-  const executeSelectedItem = () => {
-    if (selectedIndex < filteredPlayers.length) {
-      const player = filteredPlayers[selectedIndex];
-      if (player) {
-        onSelectPlayer(player);
-        onClose();
-      }
-    } else if (selectedIndex < filteredPlayers.length + filteredTools.length) {
-      const tool = filteredTools[selectedIndex - filteredPlayers.length];
-      if (tool) {
-        onSelectTab(tool.id);
-        onClose();
-      }
-    } else {
-      const action = filteredActions[selectedIndex - filteredPlayers.length - filteredTools.length];
-      if (action) {
-        action.action();
-        onClose();
-      }
-    }
-  };
+  }, [isOpen, selectedIndex, totalResultsCount, executeSelectedItem, onClose]);
 
   if (!isOpen) return null;
 

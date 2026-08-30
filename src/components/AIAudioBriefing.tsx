@@ -25,6 +25,10 @@ export const AIAudioBriefing: React.FC<AIAudioBriefingProps> = ({
   const [playbackRate, setPlaybackRate] = useState<number>(1.0);
 
 
+  const [waveHeights] = useState<number[]>([
+    35, 65, 90, 70, 40, 95, 80, 50, 85, 100, 75, 45, 90, 80, 55, 95, 65, 40, 85, 60, 35, 75, 95, 50
+  ]);
+
   // Web Speech API Integration
   useEffect(() => {
     if (!('speechSynthesis' in window)) return;
@@ -53,7 +57,7 @@ export const AIAudioBriefing: React.FC<AIAudioBriefingProps> = ({
     return () => {
       window.speechSynthesis.cancel();
     };
-  }, [isPlaying, playbackRate]);
+  }, [isPlaying, playbackRate, briefing.paragraphs, currentParagraphIndex]);
 
   const togglePlay = () => {
     setIsPlaying(!isPlaying);
@@ -104,14 +108,14 @@ export const AIAudioBriefing: React.FC<AIAudioBriefingProps> = ({
         
         {/* Animated Waveform Visualizer */}
         <div className="h-20 bg-slate-950/90 rounded-2xl p-4 border border-slate-800 flex items-center justify-center gap-1.5 overflow-hidden">
-          {[20, 45, 80, 60, 30, 95, 70, 40, 85, 100, 65, 35, 90, 75, 45, 95, 60, 30, 80, 50, 25, 70, 90, 40].map((height, i) => (
+          {waveHeights.map((height, i) => (
             <div
               key={i}
               className={`w-2 rounded-full transition-all duration-200 ${
                 isPlaying ? 'bg-gradient-to-t from-purple-500 to-emerald-400 animate-pulse' : 'bg-slate-800'
               }`}
               style={{
-                height: isPlaying ? `${Math.max(15, (height * Math.random()) + 20)}%` : '20%',
+                height: isPlaying ? `${Math.max(20, height)}%` : '20%',
               }}
             ></div>
           ))}

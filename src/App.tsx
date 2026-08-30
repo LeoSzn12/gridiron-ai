@@ -6,7 +6,13 @@ import {
   fetchLiveESPNScoreboard, 
   type LiveNFLGameScore 
 } from './services/liveDataService';
+import { 
+  fetchSleeperNFLPlayers, 
+  convertSleeperToGridironPlayer 
+} from './services/sleeperService';
 import { Navbar } from './components/Navbar';
+import { ActionCenterCard } from './components/ActionCenterCard';
+import { LineupOptimizerModal } from './components/LineupOptimizerModal';
 import { StartSitTool } from './components/StartSitTool';
 import { AIChatCoach } from './components/AIChatCoach';
 import { VegasOddsHub } from './components/VegasOddsHub';
@@ -32,17 +38,60 @@ import {
   TrendingUp 
 } from 'lucide-react';
 
+const SETTINGS_STORAGE_KEY = 'gridiron_league_settings_v1';
+const PINNED_STORAGE_KEY = 'gridiron_pinned_players_v1';
+
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('war-room');
-  const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(LEO_SZN_YAHOO_PRESET);
+  
+  // Persisted League Settings
+  const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(() => {
+    try {
+      const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return LEO_SZN_YAHOO_PRESET;
+  });
+
   const [isLeagueSettingsOpen, setIsLeagueSettingsOpen] = useState<boolean>(false);
   const [isLiveDataHubOpen, setIsLiveDataHubOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
-  const [pinnedPlayers, setPinnedPlayers] = useState<Player[]>([]);
+  const [isLineupOptimizerOpen, setIsLineupOptimizerOpen] = useState<boolean>(false);
+
+  // Persisted Pinned Players
+  const [pinnedPlayers, setPinnedPlayers] = useState<Player[]>(() => {
+    try {
+      const saved = localStorage.getItem(PINNED_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
   const [playersList, setPlayersList] = useState<Player[]>(PLAYERS_DATABASE);
   const [liveScores, setLiveScores] = useState<LiveNFLGameScore[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<Player | null>(null);
+
+  // Save settings & pinned players on change
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(leagueSettings));
+    } catch {
+      // ignore
+    }
+  }, [leagueSettings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(pinnedPlayers));
+    } catch {
+      // ignore
+    }
+  }, [pinnedPlayers]);
 
   // Global ⌘K Keyboard Shortcut Listener
   useEffect(() => {
@@ -77,6 +126,23 @@ export function App() {
       }
     }).catch(err => {
       console.warn('Initial live weather sync notice:', err);
+    });
+
+    // 3. Hydrate Sleeper full database in background
+    fetchSleeperNFLPlayers().then(sleeperData => {
+      if (isMounted && Object.keys(sleeperData).length > 0) {
+        // Enriched top key players from Sleeper
+        setPlayersList(prev => {
+          return prev.map(p => {
+            const raw = sleeperData[p.id] || Object.values(sleeperData).find(
+              sp => sp.search_full_name === p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
+            );
+            return raw ? convertSleeperToGridironPlayer(raw, p) : p;
+          });
+        });
+      }
+    }).catch(err => {
+      console.warn('Sleeper background sync notice:', err);
     });
 
     return () => {
@@ -117,6 +183,12 @@ export function App() {
     setSelectedPlayerDetail(playerA);
   };
 
+  const handleApplyOptimalLineup = (optimalStarters: Player[]) => {
+    // Re-order playersList so optimal starters are at the top
+    const starterIds = new Set(optimalStarters.map(p => p.id));
+    const nonStarters = playersList.filter(p => !starterIds.has(p.id));
+    setPlayersList([...optimalStarters, ...nonStarters]);
+  };
 
   // Filter players by search query if any
   const filteredPlayers = useMemo(() => {
@@ -142,6 +214,7 @@ export function App() {
         onOpenLeagueSettings={() => setIsLeagueSettingsOpen(true)}
         onOpenLiveDataHub={() => setIsLiveDataHubOpen(true)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenOptimizer={() => setIsLineupOptimizerOpen(true)}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
@@ -197,6 +270,15 @@ export function App() {
           </div>
         </div>
 
+        {/* Sunday Morning Action Command Center Card */}
+        <ActionCenterCard
+          players={playersList}
+          settings={leagueSettings}
+          onOpenOptimizer={() => setIsLineupOptimizerOpen(true)}
+          onOpenWeather={() => setActiveTab('weather')}
+          onOpenWaivers={() => setActiveTab('waivers')}
+          onSelectPlayerDetail={(p) => setSelectedPlayerDetail(p)}
+        />
 
         {/* Dynamic Tab Body */}
         {activeTab === 'war-room' && (
@@ -311,6 +393,16 @@ export function App() {
         settings={leagueSettings}
       />
 
+      {/* Mathematical Optimal Lineup Solver Modal */}
+      <LineupOptimizerModal
+        isOpen={isLineupOptimizerOpen}
+        onClose={() => setIsLineupOptimizerOpen(false)}
+        players={playersList}
+        settings={leagueSettings}
+        onApplyLineup={handleApplyOptimalLineup}
+        onSelectPlayerDetail={(p) => setSelectedPlayerDetail(p)}
+      />
+
       {/* Global ⌘K Command Palette Omnibar Modal */}
       <CommandPaletteModal
         isOpen={isCommandPaletteOpen}
@@ -345,6 +437,7 @@ export function App() {
         players={playersList}
         settings={leagueSettings}
         onUpdatePlayers={(updated) => setPlayersList(updated)}
+        onUpdateLeagueSettings={(newSettings) => setLeagueSettings(newSettings)}
       />
 
       {/* Footer */}
@@ -361,7 +454,7 @@ export function App() {
             <span>•</span>
             <span className="text-emerald-400 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              Live ESPN & Open-Meteo Data Pipelines Connected
+              Live Sleeper (3,000+ Players) & ESPN Data Connected
             </span>
           </div>
         </div>

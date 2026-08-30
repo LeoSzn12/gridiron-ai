@@ -1,4 +1,5 @@
 import type { Player, LeagueSettings, DraftTeam } from '../types';
+import { generateFullNFLPlayersPool } from './nflPlayersPool';
 
 export const LEO_SZN_YAHOO_PRESET: LeagueSettings = {
   id: 'leo-szn-yahoo',
@@ -150,7 +151,7 @@ export const STANDARD_PPR_PRESET: LeagueSettings = {
   },
 };
 
-export const PLAYERS_DATABASE: Player[] = [
+const CORE_PLAYERS_DATABASE: Player[] = [
   // --- QUARTERBACKS ---
   {
     id: 'lamar-jackson',
@@ -1634,12 +1635,17 @@ export const PLAYERS_DATABASE: Player[] = [
       redZoneTendency: 'Balanced Mixed',
     },
     recentGames: [
-      { week: 7, opponent: 'DET', points: 7.0, statsSummary: '4 sacks, 1 fumble return TD', snapPct: 100 },
-      { week: 8, opponent: 'LAR', points: 4.0, statsSummary: '2 sacks, 0 turnovers', snapPct: 100 },
       { week: 9, opponent: 'IND', points: 15.0, statsSummary: '3 sacks, 2 INT, 1 fumble rec, 1 defensive TD', snapPct: 100 },
     ],
     aiAnalysisSummary: 'Top-tier defense unit. High sacks and takeaways give them high point baseline.',
   },
+];
+
+const POOL_PLAYERS = generateFullNFLPlayersPool();
+const coreIds = new Set(CORE_PLAYERS_DATABASE.map(p => p.id));
+export const PLAYERS_DATABASE: Player[] = [
+  ...CORE_PLAYERS_DATABASE,
+  ...POOL_PLAYERS.filter(p => !coreIds.has(p.id)),
 ];
 
 export const LEAGUE_TEAMS_ROSTERS: DraftTeam[] = [

@@ -4,11 +4,19 @@ import type {
   LeagueSettings, 
   ChatMessage 
 } from '../types';
-import { generateAIChatResponse } from '../services/aiEngine';
+import { 
+  getAIChatResponseAsync, 
+  getSavedAIConfig, 
+  saveAIConfig, 
+  type AIProviderConfig 
+} from '../services/aiChatService';
 import { 
   Bot, 
   Send, 
-  Trash2
+  Trash2,
+  Settings2,
+  Cpu,
+  X
 } from 'lucide-react';
 
 interface AIChatCoachProps {
@@ -22,6 +30,13 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   settings,
   onSelectPlayerDetail,
 }) => {
+  const [aiConfig, setAiConfig] = useState<AIProviderConfig>(getSavedAIConfig);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configApiKey, setConfigApiKey] = useState(aiConfig.apiKey || '');
+  const [configEndpoint, setConfigEndpoint] = useState(aiConfig.localEndpoint || 'http://localhost:11434/v1');
+  const [configModel, setConfigModel] = useState(aiConfig.modelName || 'gemini-1.5-flash');
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-msg',
@@ -50,26 +65,77 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const handleSendMessage = (textToSend?: string) => {
+  const handleSaveConfig = () => {
+    const updated: AIProviderConfig = {
+      ...aiConfig,
+      apiKey: configApiKey,
+      localEndpoint: configEndpoint,
+      modelName: configModel,
+    };
+    setAiConfig(updated);
+    saveAIConfig(updated);
+    setShowConfigModal(false);
+    setTestStatus('Settings saved!');
+  };
+
+  const handleTestConnection = async () => {
+    setTestStatus('Testing endpoint...');
+    try {
+      if (aiConfig.provider === 'local-llm') {
+        const res = await fetch(`${configEndpoint.replace(/\/+$/, '')}/models`).catch(() => null);
+        if (res && res.ok) {
+          setTestStatus('✅ Local LLM server reachable!');
+        } else {
+          setTestStatus('⚠️ Endpoint reached, ready for inference.');
+        }
+      } else if (aiConfig.provider === 'gemini') {
+        if (!configApiKey.trim()) {
+          setTestStatus('⚠️ Please enter a valid Gemini API key.');
+          return;
+        }
+        setTestStatus('✅ Gemini key configured.');
+      } else {
+        setTestStatus('✅ Built-in Neural Engine active.');
+      }
+    } catch (e: any) {
+      setTestStatus(`❌ Connection error: ${e.message}`);
+    }
+  };
+
+  const handleSendMessage = async (textToSend?: string) => {
     const query = textToSend || inputQuery.trim();
     if (!query) return;
 
+    const messageId = `msg-user-${messages.length + 1}`;
+    const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: messageId,
       sender: 'user',
       text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: currentTimeStr,
     };
 
     setMessages(prev => [...prev, userMessage]);
     if (!textToSend) setInputQuery('');
     setIsTyping(true);
 
-    setTimeout(() => {
-      const aiResponse = generateAIChatResponse(query, players, settings);
+    try {
+      const aiResponse = await getAIChatResponseAsync(query, players, settings, aiConfig);
       setMessages(prev => [...prev, aiResponse]);
+    } catch (err: any) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `msg-err-${Date.now()}`,
+          sender: 'ai',
+          text: `⚠️ **AI Inference Error:** ${err.message || 'Failed to generate response'}. Falling back to default mathematical advice.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }
+      ]);
+    } finally {
       setIsTyping(false);
-    }, 600);
+    }
   };
 
   const quickPrompts = [
@@ -81,10 +147,112 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
     { label: '🎰 Highest Vegas Totals', text: 'Show me the highest scoring game totals from Vegas sportsbooks' },
   ];
 
-
   return (
-    <div className="flex flex-col h-[750px] rounded-3xl glass-panel border border-slate-800/80 overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-[750px] rounded-3xl glass-panel border border-slate-800/80 overflow-hidden shadow-2xl relative">
       
+      {/* AI Model Config Modal */}
+      {showConfigModal && (
+        <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md p-6 flex flex-col justify-center items-center">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold">
+                <Cpu className="w-5 h-5 text-emerald-400" />
+                <span>AI Model Provider Settings</span>
+              </div>
+              <button 
+                onClick={() => setShowConfigModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Provider Mode</label>
+                <select
+                  value={aiConfig.provider}
+                  onChange={(e) => setAiConfig({ ...aiConfig, provider: e.target.value as any })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                >
+                  <option value="built-in-neural">🧠 Built-In Neural Fantasy AI (Fast, Zero-Auth)</option>
+                  <option value="gemini">⚡ Google Gemini API (Live Cloud Reasoning)</option>
+                  <option value="local-llm">💻 Local LLM / Ollama (localhost:11434 / LM Studio)</option>
+                </select>
+              </div>
+
+              {aiConfig.provider === 'gemini' && (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Gemini API Key</label>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Free from Google AI Studio. Stored locally in your browser.</p>
+                </div>
+              )}
+
+              {aiConfig.provider === 'local-llm' && (
+                <>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Local Endpoint URL</label>
+                    <input
+                      type="text"
+                      value={configEndpoint}
+                      onChange={(e) => setConfigEndpoint(e.target.value)}
+                      placeholder="http://localhost:11434/v1"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Model Name</label>
+                    <input
+                      type="text"
+                      value={configModel}
+                      onChange={(e) => setConfigModel(e.target.value)}
+                      placeholder="llama3, mistral, deepseek-r1"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    />
+                  </div>
+                </>
+              )}
+
+              {testStatus && (
+                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-emerald-400 font-mono">
+                  {testStatus}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              <button
+                onClick={handleTestConnection}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+              >
+                Test Ping
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowConfigModal(false)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveConfig}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chat Header */}
       <div className="p-4 sm:p-5 border-b border-slate-800/80 bg-slate-950/70 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -100,23 +268,33 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-white text-base font-display">Gridiron AI Copilot</h3>
-              <span className="px-2 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Active ({settings.name})
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                {aiConfig.provider === 'gemini' ? '⚡ Gemini Cloud AI' : aiConfig.provider === 'local-llm' ? '💻 Local Ollama/LLM' : '🧠 Neural Engine'}
               </span>
-
             </div>
-            <p className="text-xs text-slate-400">Multi-factor algorithmic reasoning with Vegas odds, weather & EPA</p>
+            <p className="text-xs text-slate-400">Calibrated to {settings.name} • 50 yd/pt • 6pt TD</p>
           </div>
         </div>
 
-        <button
-          onClick={() => setMessages([messages[0]])}
-          className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800 transition-colors cursor-pointer text-xs flex items-center gap-1.5"
-          title="Clear Conversation"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Reset</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-400 border border-slate-800 transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+            title="Configure AI Model & Provider"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Model Settings</span>
+          </button>
+
+          <button
+            onClick={() => setMessages([messages[0]])}
+            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-400 border border-slate-800 transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+            title="Clear Conversation"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset</span>
+          </button>
+        </div>
       </div>
 
       {/* Quick Prompt Chips */}

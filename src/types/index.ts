@@ -401,3 +401,102 @@ export interface MultiSportsbookLine {
   bestValueBadge?: string;
 }
 
+// Sleeper Live API Models
+export interface SleeperRawPlayer {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  team: string | null;
+  position: string;
+  fantasy_positions?: string[];
+  injury_status?: string | null;
+  injury_notes?: string | null;
+  depth_chart_order?: number | null;
+  years_exp?: number;
+  age?: number;
+  search_full_name?: string;
+  status?: string;
+}
+
+export interface SleeperUserLeague {
+  league_id: string;
+  name: string;
+  season: string;
+  total_rosters: number;
+  status: string;
+  roster_positions: string[];
+  scoring_settings: Record<string, number>;
+  avatar?: string;
+}
+
+export interface SleeperRoster {
+  roster_id: number;
+  owner_id: string;
+  league_id: string;
+  players: string[];
+  starters: string[];
+  reserve?: string[];
+  settings: {
+    wins: number;
+    losses: number;
+    fpts: number;
+    fpts_against?: number;
+  };
+  owner_display_name?: string;
+  team_name?: string;
+  avatar?: string;
+}
+
+export interface SleeperTrendingPlayer {
+  player_id: string;
+  count: number;
+  player?: Player;
+  trendType: 'ADD' | 'DROP';
+}
+
+// Lineup Optimizer Models
+export type LineupSolverMode = 'SAFE_FLOOR' | 'BALANCED_ALPHA' | 'MAX_BOOM_CEILING';
+
+export interface LineupSwapRecommendation {
+  position: string;
+  currentStarter: Player;
+  recommendedStarter: Player;
+  projectedPointDiff: number;
+  alphaIndexDiff: number;
+  rationale: string;
+  stackBenefit?: string;
+}
+
+export interface OptimalLineupResult {
+  mode: LineupSolverMode;
+  starters: Player[];
+  bench: Player[];
+  totalProjectedPoints: number;
+  totalFloor: number;
+  totalCeiling: number;
+  totalAlphaIndex: number;
+  projectedPointGainVsCurrent: number;
+  swaps: LineupSwapRecommendation[];
+  correlationStacks: Array<{
+    qb: string;
+    target: string;
+    correlationGrade: 'ELITE' | 'HIGH' | 'MODERATE';
+    rationale: string;
+  }>;
+}
+
+// Sunday Morning Action Center Models
+export interface ActionCenterAlert {
+  id: string;
+  type: 'INJURY' | 'WEATHER' | 'TRENDING_WAIVER' | 'OPTIMAL_SWAP' | 'STREAMER';
+  severity: 'URGENT' | 'HIGH' | 'MODERATE' | 'INFO';
+  title: string;
+  description: string;
+  primaryActionLabel?: string;
+  player?: Player;
+  replacementPlayer?: Player;
+  timestamp: string;
+}
+
+

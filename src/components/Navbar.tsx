@@ -23,23 +23,26 @@ import {
 import type { LeagueSettings } from '../types';
 import type { LiveNFLGameScore } from '../services/liveDataService';
 
-interface NavbarProps {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-  leagueSettings: LeagueSettings;
-  liveGames?: LiveNFLGameScore[];
-  onOpenLeagueSettings: () => void;
-  onOpenLiveDataHub: () => void;
-  onOpenCommandPalette?: () => void;
-  searchQuery: string;
-  setSearchQuery?: (query: string) => void;
+export interface NavTool {
+  id: string;
+  label: string;
+  desc: string;
+  icon: any;
+  badge: string;
+}
+
+export interface NavCategory {
+  id: string;
+  label: string;
+  accentColor: string;
+  tools: NavTool[];
 }
 
 // 4 High-Level Navigation Categories
-export const NAVIGATION_CATEGORIES = [
+const NAVIGATION_CATEGORIES: NavCategory[] = [
   {
     id: 'ai-decisions',
-    label: '🧠 AI & Decisions',
+    label: '🏟️ Lineup & Decisions',
     accentColor: 'emerald',
     tools: [
       { id: 'war-room', label: 'Decision War Room', desc: '5-Factor Composite Alpha Index & Arbiter', icon: BrainCircuit, badge: '5-Factor AI' },
@@ -50,7 +53,7 @@ export const NAVIGATION_CATEGORIES = [
   },
   {
     id: 'draft-roster',
-    label: '🏆 Draft & Roster',
+    label: '📋 Roster & Market',
     accentColor: 'purple',
     tools: [
       { id: 'draft-room', label: 'AI Draft Room', desc: '3-QB & 5-WR Positional Scarcity Board', icon: Trophy, badge: '3-QB VORP' },
@@ -60,7 +63,7 @@ export const NAVIGATION_CATEGORIES = [
   },
   {
     id: 'gameday-live',
-    label: '⚡ Gameday & Live',
+    label: '⚡ Live Gameday',
     accentColor: 'crimson',
     tools: [
       { id: 'gamecast', label: 'Gameday Gamecast', desc: 'Live NFL Drive & Field Tracker', icon: Tv, badge: 'Live NFL' },
@@ -70,7 +73,7 @@ export const NAVIGATION_CATEGORIES = [
   },
   {
     id: 'odds-metrics',
-    label: '📊 Odds & Scheme',
+    label: '📊 Odds & Scheme Lab',
     accentColor: 'gold',
     tools: [
       { id: 'vegas-hub', label: 'Vegas Odds & Props Hub', desc: 'Sportsbook Lines, Spreads & Over/Unders', icon: DollarSign, badge: 'Vegas' },
@@ -80,6 +83,19 @@ export const NAVIGATION_CATEGORIES = [
   }
 ];
 
+interface NavbarProps {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  leagueSettings: LeagueSettings;
+  liveGames?: LiveNFLGameScore[];
+  onOpenLeagueSettings: () => void;
+  onOpenLiveDataHub: () => void;
+  onOpenCommandPalette?: () => void;
+  onOpenOptimizer?: () => void;
+  searchQuery: string;
+  setSearchQuery?: (query: string) => void;
+}
+
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
@@ -88,6 +104,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenLeagueSettings,
   onOpenLiveDataHub,
   onOpenCommandPalette,
+  onOpenOptimizer,
   searchQuery,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
@@ -110,7 +127,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs shrink-0 cursor-pointer hover:bg-emerald-500/30 border border-emerald-500/40 transition-all shadow-sm"
           >
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>LIVE NFL DATA: CONNECTED (ESPN & OPEN-METEO)</span>
+            <span>LIVE DATA: SLEEPER (3,000+ PLAYERS) & ESPN CONNECTED</span>
           </button>
 
           <div className="overflow-hidden whitespace-nowrap flex-1">
@@ -147,7 +164,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ))
               ) : (
                 <div className="text-xs text-slate-400 font-mono">
-                  Connecting to Live ESPN NFL Week 1 Scoreboard...
+                  Connecting to Live ESPN NFL Week 1 Scoreboard & Sleeper Data Feeds...
                 </div>
               )}
             </div>
@@ -173,14 +190,24 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div>
                 <div className="flex items-center gap-2.5">
                   <span className="text-2xl font-black font-display tracking-tight text-white">GRIDIRON <span className="text-gradient-gold">AI</span></span>
-                  <span className="px-2 py-0.5 text-xs font-bold font-mono uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg">v2.4 Pro</span>
+                  <span className="px-2 py-0.5 text-xs font-bold font-mono uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg">v2.5 Pro</span>
                 </div>
                 <p className="text-xs text-slate-300 hidden sm:block font-medium">Real-Time NFL Stats, Vegas Odds & Scheme Synthesis</p>
               </div>
             </div>
 
-            {/* League Settings & Live Hub Buttons */}
+            {/* Quick Action Buttons */}
             <div className="flex items-center gap-2.5">
+              {onOpenOptimizer && (
+                <button
+                  onClick={onOpenOptimizer}
+                  className="hidden lg:flex items-center gap-2 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/50 text-emerald-300 px-3.5 py-2 rounded-2xl cursor-pointer transition-all shadow-md text-xs font-bold"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Optimal Lineup Solver</span>
+                </button>
+              )}
+
               <button
                 onClick={onOpenLiveDataHub}
                 className="hidden sm:flex items-center gap-2 bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300 px-3.5 py-2 rounded-2xl cursor-pointer transition-all shadow-md text-xs font-mono font-bold"
@@ -248,7 +275,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div>
                     <h3 className="font-bold text-white text-base font-display">Gridiron Intelligence Terminal Modules</h3>
-                    <p className="text-xs text-slate-400">Select any of the 13 specialized tools tailored for your league.</p>
+                    <p className="text-xs text-slate-400">Select any of the specialized modules grouped by workflow.</p>
                   </div>
                   <button 
                     onClick={() => setIsMegaMenuOpen(false)}
@@ -334,3 +361,5 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+
+export default Navbar;

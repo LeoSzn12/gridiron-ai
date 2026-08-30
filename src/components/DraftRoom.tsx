@@ -20,15 +20,19 @@ interface DraftRoomProps {
   onSelectPlayerDetail: (player: Player) => void;
 }
 
-const INITIAL_TEAMS: Array<{ id: string; name: string; isUser: boolean; avatar: string }> = [
-  { id: 'team-1', name: 'Jalen Hurts Me Daddy', isUser: false, avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-2', name: 'Mahomes & Chill', isUser: false, avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-3', name: 'Leo Szn', isUser: true, avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-4', name: 'Bijan Mustard', isUser: false, avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-5', name: 'Chase The Bag', isUser: false, avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-6', name: 'Kittle Big Town', isUser: false, avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-7', name: 'Lamarable', isUser: false, avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80' },
-  { id: 'team-8', name: 'Surtain Doom', isUser: false, avatar: 'https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?w=100&auto=format&fit=crop&q=80' },
+const INITIAL_TEAM_AVATARS = [
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
 ];
 
 export const DraftRoom: React.FC<DraftRoomProps> = ({
@@ -39,6 +43,21 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
   const totalRounds = settings.roster.qb + settings.roster.rb + settings.roster.wr + settings.roster.te + 
                       settings.roster.k + settings.roster.def + settings.roster.db + settings.roster.dl + 
                       settings.roster.lb + settings.roster.bench; // e.g. 27 rounds
+
+  const teams = useMemo(() => {
+    const defaultNames = [
+      'Jalen Hurts Me Daddy', 'Mahomes & Chill', settings.userTeamName || 'Leo Szn',
+      'Bijan Mustard', 'Chase The Bag', 'Kittle Big Town',
+      'Lamarable', 'Surtain Doom', 'Caleb & Able', 'Nabers In Paris',
+      'Stroud 9', 'Allen Wrench'
+    ];
+    return Array.from({ length: settings.numTeams }).map((_, idx) => ({
+      id: `team-${idx + 1}`,
+      name: idx === 2 ? (settings.userTeamName || 'Leo Szn') : (defaultNames[idx] || `Team ${idx + 1}`),
+      isUser: idx === 2,
+      avatar: INITIAL_TEAM_AVATARS[idx % INITIAL_TEAM_AVATARS.length],
+    }));
+  }, [settings.numTeams, settings.userTeamName]);
   
   const [draftedPicks, setDraftedPicks] = useState<DraftPick[]>([]);
   const [positionFilter, setPositionFilter] = useState<PlayerPosition | 'ALL'>('ALL');
@@ -67,7 +86,7 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
     ? (currentPickIndex % settings.numTeams) 
     : (settings.numTeams - 1 - (currentPickIndex % settings.numTeams));
   
-  const currentTeam = INITIAL_TEAMS[currentTeamIndex] || INITIAL_TEAMS[0];
+  const currentTeam = teams[currentTeamIndex] || teams[0];
   const isUserOnTheClock = currentTeam.isUser;
   const isDraftFinished = currentPickIndex >= totalRounds * settings.numTeams;
 
@@ -123,7 +142,7 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
       const teamIdx = round % 2 === 1 
         ? (simIndex % settings.numTeams) 
         : (settings.numTeams - 1 - (simIndex % settings.numTeams));
-      const team = INITIAL_TEAMS[teamIdx];
+      const team = teams[teamIdx] || teams[0];
 
       // If it's user's turn and we've advanced at least once, stop and let user pick
       if (team.isUser && simIndex > draftedPicks.length) {
