@@ -19,12 +19,13 @@ import {
   BrainCircuit 
 } from 'lucide-react';
 import type { LeagueSettings } from '../types';
-import { VEGAS_GAMES_SCHEDULE } from '../data/mockData';
+import type { LiveNFLGameScore } from '../services/liveDataService';
 
 interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   leagueSettings: LeagueSettings;
+  liveGames?: LiveNFLGameScore[];
   onOpenLeagueSettings: () => void;
   onOpenLiveDataHub: () => void;
   searchQuery: string;
@@ -35,6 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   leagueSettings,
+  liveGames = [],
   onOpenLeagueSettings,
   onOpenLiveDataHub,
   searchQuery,
@@ -56,10 +58,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'trades', label: 'Trade Analyzer', icon: ArrowLeftRight, badge: 'ROS' },
   ];
 
+  // Games for ticker (duplicated for continuous smooth marquee)
+  const tickerGames = liveGames.length > 0 ? liveGames.concat(liveGames) : [];
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-800/80 bg-[#070B14]/90 backdrop-blur-xl">
-      {/* Live Vegas & Weather Ticker Bar */}
+      {/* Live ESPN Vegas & Weather Ticker Bar */}
       <div className="w-full bg-gradient-to-r from-emerald-950/40 via-slate-900/60 to-indigo-950/40 border-b border-slate-800/40 py-1.5 px-4 overflow-hidden text-xs">
         <div className="flex items-center gap-3">
           <div 
@@ -67,22 +71,46 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono font-semibold shrink-0 cursor-pointer hover:bg-emerald-500/30 transition-colors"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            LIVE NFL DATA: CONNECTED (ESPN & OPEN-METEO)
+            LIVE NFL DATA (ESPN WEEK 1 SLATE): CONNECTED
           </div>
+
           <div className="overflow-hidden whitespace-nowrap flex-1">
             <div className="animate-marquee gap-8 items-center text-slate-300">
-              {VEGAS_GAMES_SCHEDULE.concat(VEGAS_GAMES_SCHEDULE).map((game, idx) => (
-                <div key={idx} className="inline-flex items-center gap-3 text-xs">
-                  <span className="font-semibold text-slate-200">{game.matchup}</span>
-                  <span className="font-mono text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/30">{game.spread}</span>
-                  <span className="font-mono text-indigo-300">O/U {game.total}</span>
-                  <span className="text-slate-400 inline-flex items-center gap-1">
-                    <CloudSun className="w-3.5 h-3.5 text-amber-400" />
-                    {game.weatherSummary}
-                  </span>
-                  <span className="text-slate-600">|</span>
+              {tickerGames.length > 0 ? (
+                tickerGames.map((game, idx) => (
+                  <div key={`${game.id}-${idx}`} className="inline-flex items-center gap-3 text-xs">
+                    <span className="font-semibold text-white flex items-center gap-1.5">
+                      <img src={game.awayTeam.logo} alt="" className="w-3.5 h-3.5 object-contain inline" />
+                      <span>{game.awayTeam.abbreviation}</span>
+                      <span className="text-slate-500">@</span>
+                      <img src={game.homeTeam.logo} alt="" className="w-3.5 h-3.5 object-contain inline" />
+                      <span>{game.homeTeam.abbreviation}</span>
+                    </span>
+
+                    {game.odds?.spread && (
+                      <span className="font-mono text-emerald-400 bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-800/30 font-bold">
+                        {game.odds.spread}
+                      </span>
+                    )}
+
+                    {game.odds?.overUnder && (
+                      <span className="font-mono text-indigo-300 font-medium">
+                        O/U {game.odds.overUnder}
+                      </span>
+                    )}
+
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      {game.gameTime}
+                    </span>
+
+                    <span className="text-slate-700">|</span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-xs text-slate-400 font-mono">
+                  Loading Live ESPN NFL Week 1 Scoreboard...
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -94,7 +122,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           
           {/* Logo & Identity */}
           <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
-            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('draft-room')}>
+            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('war-room')}>
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-indigo-500 p-0.5 shadow-lg shadow-emerald-500/20 flex items-center justify-center">
                 <div className="w-full h-full bg-[#070B14] rounded-[10px] flex items-center justify-center">
                   <Sparkles className="w-5 h-5 text-emerald-400" />
@@ -105,7 +133,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="text-xl font-bold font-display tracking-tight text-white">GRIDIRON <span className="text-gradient-emerald">AI</span></span>
                   <span className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded">v2.4 Pro</span>
                 </div>
-                <p className="text-[11px] text-slate-400 hidden sm:block">Next-Gen Fantasy Intelligence & Betting Odds Engine</p>
+                <p className="text-[11px] text-slate-400 hidden sm:block">Real-Time NFL Stats, Vegas Odds & Scheme Intelligence</p>
               </div>
             </div>
 
@@ -117,7 +145,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="hidden sm:flex items-center gap-1.5 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 px-3 py-1.5 rounded-2xl cursor-pointer transition-all shadow-md text-xs font-mono font-bold"
               >
                 <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                <span>Live Feeds</span>
+                <span>Live Feeds ({liveGames.length} NFL Games)</span>
               </div>
 
               {/* Custom League Badge & Settings Trigger */}
