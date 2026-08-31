@@ -8,6 +8,18 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    host: true,
+    port: 5173,
+    cors: true,
+    allowedHosts: true,
+  },
+  preview: {
+    host: true,
+    port: 5173,
+    cors: true,
+    allowedHosts: true,
+  },
   build: {
     rollupOptions: {
       output: {
