@@ -1,4 +1,5 @@
 import type { Player, LeagueSettings, DraftTeam } from '../types';
+import { generateFullNFLPlayersPool } from './nflPlayersPool';
 
 export const LEO_SZN_YAHOO_PRESET: LeagueSettings = {
   id: 'leo-szn-yahoo',
@@ -150,7 +151,157 @@ export const STANDARD_PPR_PRESET: LeagueSettings = {
   },
 };
 
-export const PLAYERS_DATABASE: Player[] = [
+export const HALF_PPR_10_PRESET: LeagueSettings = {
+  id: 'half-ppr-10',
+  name: '10-Team Half-PPR',
+  platform: 'Sleeper',
+  numTeams: 10,
+  userTeamName: 'Leo Szn',
+  roster: {
+    qb: 1,
+    rb: 2,
+    wr: 3,
+    te: 1,
+    k: 1,
+    def: 1,
+    db: 0,
+    dl: 0,
+    lb: 0,
+    bench: 6,
+    ir: 2,
+  },
+  offense: {
+    passYardsPerPoint: 25,
+    passTouchdown: 4,
+    interception: -1,
+    pickSixThrown: 0,
+    rushYardsPerPoint: 10,
+    rushTouchdown: 6,
+    recYardsPerPoint: 10,
+    recTouchdown: 6,
+    receptionsPPR: 0.5,
+    fumblesLost: -2,
+    twoPointConversions: 2,
+    offensiveFumbleReturnTD: 6,
+  },
+  kicker: {
+    fg0_19: 3,
+    fg20_29: 3,
+    fg30_39: 3,
+    fg40_49: 4,
+    fg50Plus: 5,
+    fg60Plus: 5,
+    patMade: 1,
+    patMissed: 0,
+  },
+  defTeam: {
+    sack: 1,
+    interception: 2,
+    fumbleRecovery: 2,
+    touchdown: 6,
+    safety: 2,
+    blockKick: 2,
+    kickPuntReturnTD: 6,
+    ptsAllowed0: 10,
+    ptsAllowed1_6: 7,
+    ptsAllowed7_13: 4,
+    ptsAllowed14_20: 1,
+    ptsAllowed21_27: 0,
+    ptsAllowed28_34: -1,
+    ptsAllowed35Plus: -4,
+    extraPointReturned: 2,
+  },
+  idp: {
+    sack: 2,
+    interception: 3,
+    fumbleForce: 2,
+    fumbleRecovery: 2,
+    defensiveTouchdown: 6,
+    safety: 2,
+    blockKick: 2,
+    soloTackle: 1.5,
+    assistedTackle: 0.75,
+    passDefended: 1.5,
+    tackleForLoss: 1.5,
+  },
+};
+
+export const DFS_PROPS_PRESET: LeagueSettings = {
+  id: 'dfs-props',
+  name: 'DFS & Player Props (PrizePicks / Underdog)',
+  platform: 'Yahoo',
+  numTeams: 1,
+  userTeamName: 'Props Player',
+  roster: {
+    qb: 1,
+    rb: 2,
+    wr: 3,
+    te: 1,
+    k: 0,
+    def: 0,
+    db: 0,
+    dl: 0,
+    lb: 0,
+    bench: 0,
+    ir: 0,
+  },
+  offense: {
+    passYardsPerPoint: 25,
+    passTouchdown: 4,
+    interception: -1,
+    pickSixThrown: 0,
+    rushYardsPerPoint: 10,
+    rushTouchdown: 6,
+    recYardsPerPoint: 10,
+    recTouchdown: 6,
+    receptionsPPR: 1.0,
+    fumblesLost: -2,
+    twoPointConversions: 2,
+    offensiveFumbleReturnTD: 6,
+  },
+  kicker: {
+    fg0_19: 3,
+    fg20_29: 3,
+    fg30_39: 3,
+    fg40_49: 4,
+    fg50Plus: 5,
+    fg60Plus: 5,
+    patMade: 1,
+    patMissed: 0,
+  },
+  defTeam: {
+    sack: 1,
+    interception: 2,
+    fumbleRecovery: 2,
+    touchdown: 6,
+    safety: 2,
+    blockKick: 2,
+    kickPuntReturnTD: 6,
+    ptsAllowed0: 10,
+    ptsAllowed1_6: 7,
+    ptsAllowed7_13: 4,
+    ptsAllowed14_20: 1,
+    ptsAllowed21_27: 0,
+    ptsAllowed28_34: -1,
+    ptsAllowed35Plus: -4,
+    extraPointReturned: 2,
+  },
+  idp: {
+    sack: 0,
+    interception: 0,
+    fumbleForce: 0,
+    fumbleRecovery: 0,
+    defensiveTouchdown: 0,
+    safety: 0,
+    blockKick: 0,
+    soloTackle: 0,
+    assistedTackle: 0,
+    passDefended: 0,
+    tackleForLoss: 0,
+  },
+};
+
+const CORE_PLAYERS_DATABASE: Player[] = [
   // --- QUARTERBACKS ---
   {
     id: 'lamar-jackson',
@@ -1634,12 +1785,17 @@ export const PLAYERS_DATABASE: Player[] = [
       redZoneTendency: 'Balanced Mixed',
     },
     recentGames: [
-      { week: 7, opponent: 'DET', points: 7.0, statsSummary: '4 sacks, 1 fumble return TD', snapPct: 100 },
-      { week: 8, opponent: 'LAR', points: 4.0, statsSummary: '2 sacks, 0 turnovers', snapPct: 100 },
       { week: 9, opponent: 'IND', points: 15.0, statsSummary: '3 sacks, 2 INT, 1 fumble rec, 1 defensive TD', snapPct: 100 },
     ],
     aiAnalysisSummary: 'Top-tier defense unit. High sacks and takeaways give them high point baseline.',
   },
+];
+
+const POOL_PLAYERS = generateFullNFLPlayersPool();
+const coreIds = new Set(CORE_PLAYERS_DATABASE.map(p => p.id));
+export const PLAYERS_DATABASE: Player[] = [
+  ...CORE_PLAYERS_DATABASE,
+  ...POOL_PLAYERS.filter(p => !coreIds.has(p.id)),
 ];
 
 export const LEAGUE_TEAMS_ROSTERS: DraftTeam[] = [

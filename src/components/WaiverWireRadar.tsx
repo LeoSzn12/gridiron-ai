@@ -11,12 +11,14 @@ interface WaiverWireRadarProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  myRoster?: Player[];
 }
 
 export const WaiverWireRadar: React.FC<WaiverWireRadarProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  myRoster = [],
 }) => {
   const [faabBudget, setFaabBudget] = useState(100);
   const [strategy, setStrategy] = useState<'AGGRESSIVE' | 'BALANCED' | 'CONSERVATIVE'>('AGGRESSIVE');
@@ -31,11 +33,38 @@ export const WaiverWireRadar: React.FC<WaiverWireRadarProps> = ({
     return Math.max(1, Math.round((faabBudget * (recPct / 100)) * strategyMultiplier));
   };
 
-  const dropCandidates = [
-    { name: 'Alexander Mattison', team: 'LV', pos: 'RB', reason: 'Lost starting backfield role to Zamir White & Ameer Abdullah. Snap share down to 24%.' },
-    { name: 'Gabe Davis', team: 'JAX', pos: 'WR', reason: 'Target share eclipsed by Brian Thomas Jr. and Christian Kirk. Under 4 targets/gm.' },
-    { name: 'Deshaun Watson', team: 'CLE', pos: 'QB', reason: 'Out for season (Achilles tendon tear). Clear IR/Drop candidate in redraft.' },
-  ];
+  const dropCandidates = React.useMemo(() => {
+    if (myRoster.length > 0) {
+      // Find lowest projected and injured/reserve players on user's own roster
+      const sorted = [...myRoster].sort((a, b) => {
+        const prA = calculateProjection(a, settings).projectedPoints;
+        const prB = calculateProjection(b, settings).projectedPoints;
+        return prA - prB;
+      });
+
+      return sorted.slice(0, 3).map(p => {
+        const pr = calculateProjection(p, settings);
+        let reason = `Projecting ${pr.projectedPoints} pts with low volume share. Prime bench pivot for waiver upside.`;
+        if (p.injuryStatus === 'OUT' || p.injuryStatus === 'IR') {
+          reason = `Designated as ${p.injuryStatus}. Inactive asset freeing roster depth.`;
+        } else if (p.stats.snapSharePct < 40) {
+          reason = `Snap share down to ${p.stats.snapSharePct}%. Replaced in primary rotational package.`;
+        }
+        return {
+          name: p.name,
+          team: p.team,
+          pos: p.position,
+          reason,
+        };
+      });
+    }
+
+    return [
+      { name: 'Alexander Mattison', team: 'LV', pos: 'RB', reason: 'Lost starting backfield role to Zamir White & Ameer Abdullah. Snap share down to 24%.' },
+      { name: 'Gabe Davis', team: 'JAX', pos: 'WR', reason: 'Target share eclipsed by Brian Thomas Jr. and Christian Kirk. Under 4 targets/gm.' },
+      { name: 'Deshaun Watson', team: 'CLE', pos: 'QB', reason: 'Out for season (Achilles tendon tear). Clear IR/Drop candidate in redraft.' },
+    ];
+  }, [myRoster, settings]);
 
   return (
     <div className="space-y-8">

@@ -1,31 +1,42 @@
 import React, { useState, useMemo } from 'react';
 import type { Player, LeagueSettings, DecisionFactorWeights, PlayerCompositeDecision } from '../types';
-import { calculateCompositeDecision, compareMultiSportsbookOdds } from '../services/aiEngine';
+import { calculateCompositeDecision, compareMultiSportsbookOdds, calculateProjection } from '../services/aiEngine';
 import { 
   BrainCircuit, 
   Sliders, 
-  Sparkles, 
   CheckCircle2, 
   RotateCcw, 
   DollarSign, 
   Wind, 
   ShieldCheck, 
   Flame, 
-  Award 
+  Award,
+  Pin,
+  PinOff 
 } from 'lucide-react';
+
 import confetti from 'canvas-confetti';
 
+import { EmptyState } from './ui';
 
 interface DecisionEngineWarRoomProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  onPinPlayer?: (player: Player) => void;
+  pinnedPlayerIds?: string[];
+  myRosterIds?: string[];
 }
+
+import { PlayerFilterBar, type PlayerFilterState } from './PlayerFilterBar';
 
 export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  onPinPlayer,
+  pinnedPlayerIds = [],
+  myRosterIds = [],
 }) => {
   // Weights State
   const [weights, setWeights] = useState<DecisionFactorWeights>({
@@ -39,13 +50,98 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   const [selectedPlayerAId, setSelectedPlayerAId] = useState<string>(players[0]?.id || 'lamar-jackson');
   const [selectedPlayerBId, setSelectedPlayerBId] = useState<string>(players[1]?.id || 'jayden-daniels');
   const [activeTab, setActiveTab] = useState<'decision-matrix' | 'duel-arbitration' | 'sportsbook-compare'>('decision-matrix');
+  
+  const [filterState, setFilterState] = useState<PlayerFilterState>({
+    searchQuery: '',
+    position: 'ALL',
+    team: 'ALL',
+    category: 'ALL',
+    sortBy: 'ALPHA',
+    sortAscending: false,
+  });
 
   // Compute decisions for all players
   const playerDecisions: PlayerCompositeDecision[] = useMemo(() => {
     return players
       .map(p => calculateCompositeDecision(p, settings, weights))
-      .sort((a, b) => b.alphaIndex - a.alphaIndex);
-  }, [players, settings, weights]);
+      .filter(d => {
+        const originalPlayer = players.find(p => p.id === d.playerId);
+        if (!originalPlayer) return false;
+
+        // Search text
+        if (filterState.searchQuery.trim()) {
+          const q = filterState.searchQuery.toLowerCase().trim();
+          const matchName = d.playerName.toLowerCase().includes(q);
+          const matchTeam = d.team.toLowerCase().includes(q);
+          const matchPos = d.position.toLowerCase() === q;
+          if (!matchName && !matchTeam && !matchPos) return false;
+        }
+
+        // Team filter
+        if (filterState.team !== 'ALL' && d.team !== filterState.team) {
+          return false;
+        }
+
+        // Position filter
+        if (filterState.position !== 'ALL') {
+          if (filterState.position === 'IDP') {
+            if (!['DL', 'LB', 'DB'].includes(d.position)) return false;
+          } else if (d.position !== filterState.position) {
+            return false;
+          }
+        }
+
+        // Category filter
+        if (filterState.category === 'MY_ROSTER' && !myRosterIds.includes(d.playerId)) return false;
+        if (filterState.category === 'SMASH' && d.alphaIndex < 85) return false;
+        if (filterState.category === 'SIT' && d.alphaIndex >= 68) return false;
+        if (filterState.category === 'INJURED' && originalPlayer.injuryStatus === 'HEALTHY') return false;
+        if (filterState.category === 'DOME' && !originalPlayer.weather.isDome) return false;
+        if (filterState.category === 'WAIVER' && !originalPlayer.isWaiverTarget) return false;
+
+        return true;
+      })
+      .sort((a, b) => {
+        const pA = players.find(p => p.id === a.playerId)!;
+        const pB = players.find(p => p.id === b.playerId)!;
+
+        let diff = 0;
+        switch (filterState.sortBy) {
+          case 'ALPHA':
+            diff = b.alphaIndex - a.alphaIndex;
+            break;
+          case 'PROJECTION':
+            diff = b.projectedPoints - a.projectedPoints;
+            break;
+          case 'VORP': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.vorpValue - prA.vorpValue;
+            break;
+          }
+          case 'VEGAS':
+            diff = (pB.vegas?.impliedTeamTotal || 0) - (pA.vegas?.impliedTeamTotal || 0);
+            break;
+          case 'TRADE_VALUE':
+            diff = (pB.tradeValue || 0) - (pA.tradeValue || 0);
+            break;
+          case 'CEILING': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.ceiling - prA.ceiling;
+            break;
+          }
+          case 'FLOOR': {
+            const prA = calculateProjection(pA, settings);
+            const prB = calculateProjection(pB, settings);
+            diff = prB.floor - prA.floor;
+            break;
+          }
+        }
+        return filterState.sortAscending ? -diff : diff;
+      });
+  }, [players, settings, weights, filterState, myRosterIds]);
+
 
   // Selected duel players
   const playerA = players.find(p => p.id === selectedPlayerAId) || players[0];
@@ -244,93 +340,124 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
       {/* 1. Alpha Index Decision Board */}
       {activeTab === 'decision-matrix' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>Ranked Composite Decision Board ({playerDecisions.length} Players Evaluated)</span>
-            </h3>
-            <span className="text-xs font-mono text-slate-400">Live Scored via Active Weights</span>
-          </div>
+          <PlayerFilterBar
+            filters={filterState}
+            onFilterChange={setFilterState}
+            totalPlayersCount={players.length}
+            filteredCount={playerDecisions.length}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {playerDecisions.length === 0 && (
+              <div className="col-span-full">
+                <EmptyState
+                  title="No Players Match Your Filters"
+                  description="Try adjusting your position, team, or category filters to see players in the Alpha Index board."
+                  onResetFilters={() => setFilterState({ searchQuery: '', position: 'ALL', team: 'ALL', category: 'ALL', sortBy: 'ALPHA', sortAscending: false })}
+                />
+              </div>
+            )}
             {playerDecisions.map((dec) => {
               const originalPlayer = players.find(p => p.id === dec.playerId);
+              const isPinned = pinnedPlayerIds.includes(dec.playerId);
+
               return (
                 <div
                   key={dec.playerId}
                   onClick={() => originalPlayer && onSelectPlayerDetail(originalPlayer)}
-                  className={`p-5 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] ${
+                  className={`p-6 rounded-3xl border transition-all cursor-pointer space-y-4 hover:scale-[1.01] relative group shadow-xl ${
                     dec.recommendationTier === 'SMASH_START'
-                      ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900/90 to-slate-950 border-emerald-500/50 ring-1 ring-emerald-500/20'
+                      ? 'bg-gradient-to-br from-amber-950/30 via-slate-900/95 to-slate-950 border-amber-500/50 ring-1 ring-amber-500/30 shadow-amber-500/10'
                       : dec.recommendationTier === 'STRONG_START'
-                      ? 'bg-slate-900/80 border-slate-700'
-                      : 'glass-panel border-slate-800'
+                      ? 'bg-gradient-to-br from-purple-950/30 via-slate-900/95 to-slate-950 border-purple-500/50 ring-1 ring-purple-500/30 shadow-purple-500/10'
+                      : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
                   }`}
                 >
                   {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
                       {originalPlayer?.avatar && (
-                        <img src={originalPlayer.avatar} alt={dec.playerName} className="w-10 h-10 rounded-2xl object-cover" />
+                        <img src={originalPlayer.avatar} alt={dec.playerName} className="w-12 h-12 rounded-2xl object-cover border border-slate-700 shadow-md" />
                       )}
                       <div>
-                        <div className="font-bold text-white text-sm">{dec.playerName}</div>
-                        <div className="text-xs font-mono text-slate-400">{dec.position} • {dec.team} vs {dec.opponent}</div>
+                        <div className="font-extrabold text-white text-base sm:text-lg font-display tracking-tight">{dec.playerName}</div>
+                        <div className="text-xs font-mono text-slate-300 font-semibold mt-0.5">{dec.position} • {dec.team} vs {dec.opponent}</div>
                       </div>
                     </div>
 
-                    {/* Alpha Rating Badge */}
-                    <div className="text-right">
-                      <div className="text-2xl font-black font-mono text-emerald-400">{dec.alphaIndex}</div>
-                      <div className="text-[9px] font-mono text-slate-400 uppercase">ALPHA SCORE</div>
+                    <div className="flex items-center gap-2.5">
+                      {/* Pin Button */}
+                      {onPinPlayer && originalPlayer && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onPinPlayer(originalPlayer);
+                          }}
+                          className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                            isPinned
+                              ? 'bg-amber-500/30 border-amber-500 text-amber-300 shadow-sm'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          }`}
+                          title={isPinned ? 'Unpin Player' : 'Pin to Compare'}
+                        >
+                          {isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+                        </button>
+                      )}
+
+                      {/* Alpha Rating Badge */}
+                      <div className="text-right">
+                        <div className="text-3xl font-black font-mono text-amber-400 leading-none">{dec.alphaIndex}</div>
+                        <div className="text-[10px] font-mono text-slate-400 uppercase font-bold mt-0.5">ALPHA SCORE</div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Tier Pill */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                      dec.recommendationTier === 'SMASH_START' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
-                      dec.recommendationTier === 'STRONG_START' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' :
-                      'bg-slate-800 text-slate-300'
+                  {/* Tier Pill & Projected Points */}
+                  <div className="flex items-center justify-between text-xs py-1 border-y border-slate-800/80">
+                    <span className={`px-3 py-1 rounded-xl font-mono font-extrabold text-xs ${
+                      dec.recommendationTier === 'SMASH_START' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50' :
+                      dec.recommendationTier === 'STRONG_START' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50' :
+                      dec.recommendationTier === 'VOLATILE_SIT' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50' :
+                      'bg-slate-800 text-slate-300 border border-slate-700'
                     }`}>
                       {dec.recommendationTier.replace('_', ' ')}
                     </span>
-                    <span className="font-mono text-slate-300 text-[11px]">
-                      Proj: <strong className="text-emerald-400">{dec.projectedPoints} pts</strong>
+                    <span className="font-mono text-slate-200 text-xs sm:text-sm">
+                      Proj: <strong className="text-emerald-400 text-sm sm:text-base font-black">{dec.projectedPoints} pts</strong>
                     </span>
                   </div>
 
                   {/* 5 Sub-Score Progress Bars */}
-                  <div className="space-y-1.5 text-[10px] font-mono">
-                    <div className="flex justify-between text-slate-400">
-                      <span>Vegas Line Efficiency</span>
-                      <span className="text-emerald-400 font-bold">{dec.subScores.vegasEfficiency}/100</span>
+                  <div className="space-y-2 text-xs font-mono">
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-amber-300 font-semibold">💵 Vegas Line Efficiency</span>
+                      <span className="text-amber-400 font-bold">{dec.subScores.vegasEfficiency}/100</span>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${dec.subScores.vegasEfficiency}%` }}></div>
-                    </div>
-
-                    <div className="flex justify-between text-slate-400">
-                      <span>Matchup & DvP Advantage</span>
-                      <span className="text-indigo-400 font-bold">{dec.subScores.matchupAdvantage}/100</span>
-                    </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${dec.subScores.matchupAdvantage}%` }}></div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full" style={{ width: `${dec.subScores.vegasEfficiency}%` }}></div>
                     </div>
 
-                    <div className="flex justify-between text-slate-400">
-                      <span>Weather Environmental Factor</span>
-                      <span className="text-sky-400 font-bold">{dec.subScores.weatherConditions}/100</span>
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-purple-300 font-semibold">🛡️ Matchup & DvP Advantage</span>
+                      <span className="text-purple-400 font-bold">{dec.subScores.matchupAdvantage}/100</span>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-                      <div className="h-full bg-sky-500 rounded-full" style={{ width: `${dec.subScores.weatherConditions}%` }}></div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 rounded-full" style={{ width: `${dec.subScores.matchupAdvantage}%` }}></div>
+                    </div>
+
+                    <div className="flex justify-between text-slate-300">
+                      <span className="text-cyan-300 font-semibold">🌪️ Weather & Venue Factor</span>
+                      <span className="text-cyan-400 font-bold">{dec.subScores.weatherConditions}/100</span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-cyan-500 to-sky-400 rounded-full" style={{ width: `${dec.subScores.weatherConditions}%` }}></div>
                     </div>
                   </div>
 
                   {/* Key Tactical Driver */}
-                  <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[11px] text-slate-300">
-                    <span className="text-emerald-400 font-bold">✓ </span>
-                    <span>{dec.keyPositiveFactors[0]}</span>
+                  <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-200 flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold text-sm">✓</span>
+                    <span className="leading-relaxed">{dec.keyPositiveFactors[0]}</span>
                   </div>
                 </div>
               );
@@ -338,6 +465,7 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
           </div>
         </div>
       )}
+
 
       {/* 2. AI Duel Arbiter Tab */}
       {activeTab === 'duel-arbitration' && (
@@ -491,9 +619,9 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
-                  <span>Real Sportsbook Line Comparison for {playerA.name}</span>
+                  <span>Estimated Sportsbook Line Comparison for {playerA.name}</span>
                 </h3>
-                <p className="text-xs text-slate-400">Live consensus lines from DraftKings, FanDuel, BetMGM, Caesars, and ESPN BET.</p>
+                <p className="text-xs text-slate-400">Estimated lines derived from base Vegas odds — not live sportsbook feeds. Use for directional comparison only.</p>
               </div>
 
               <select

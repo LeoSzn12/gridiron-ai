@@ -196,10 +196,24 @@ export async function fetchSleeperNFLState(): Promise<{ week: number; season: st
 }
 
 // 4. Update Database with Real Live Weather & NFL Odds
+// Uses game-location stadium: home team's venue for accurate weather.
 export async function syncLivePlayerData(players: Player[] = PLAYERS_DATABASE): Promise<Player[]> {
+  // Cache weather by stadium to avoid duplicate API calls for same venue
+  const weatherCache = new Map<string, Partial<PlayerWeather> | null>();
+
   const updatedPlayers = await Promise.all(
     players.map(async (player) => {
-      const weatherUpdate = await fetchLiveStadiumWeather(player.team);
+      // Determine the game-location stadium team abbreviation:
+      // - Home games: use the player's own team
+      // - Away games: use the opponent's team (that's where the game is played)
+      const gameStadiumTeam = player.isHome ? player.team : player.opponent.replace(/^(vs |@ )/, '');
+      const stadiumKey = gameStadiumTeam || player.team;
+
+      if (!weatherCache.has(stadiumKey)) {
+        weatherCache.set(stadiumKey, await fetchLiveStadiumWeather(stadiumKey));
+      }
+
+      const weatherUpdate = weatherCache.get(stadiumKey);
       if (weatherUpdate) {
         return {
           ...player,
@@ -214,3 +228,121 @@ export async function syncLivePlayerData(players: Player[] = PLAYERS_DATABASE): 
   );
   return updatedPlayers;
 }
+
+export interface EndpointTelemetry {
+  name: string;
+  url: string;
+  status: 'ONLINE' | 'OFFLINE' | 'TESTING';
+  httpCode: number;
+  latencyMs: number;
+  payloadPreview: any;
+  lastChecked: string;
+}
+
+// 5. Full Real-Time Endpoint Diagnostics Telemetry
+export async function checkLiveEndpointsTelemetry(): Promise<EndpointTelemetry[]> {
+  const results: EndpointTelemetry[] = [];
+
+  // 1. ESPN Scoreboard API
+  const espnStart = performance.now();
+  try {
+    const espnRes = await fetch('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard');
+    const espnLatency = Math.round(performance.now() - espnStart);
+    const espnData = await espnRes.json();
+    const eventSnippet = espnData?.events?.slice(0, 2).map((e: any) => ({
+      game: e.name,
+      status: e.status?.type?.detail || e.status?.type?.state,
+      odds: e.competitions?.[0]?.odds?.[0]?.details || 'N/A',
+    })) || [];
+
+    results.push({
+      name: 'ESPN Live Scoreboard & Odds API',
+      url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
+      status: espnRes.ok ? 'ONLINE' : 'OFFLINE',
+      httpCode: espnRes.status,
+      latencyMs: espnLatency,
+      payloadPreview: {
+        league: espnData?.leagues?.[0]?.name || 'NFL',
+        seasonYear: espnData?.leagues?.[0]?.season?.year || 2024,
+        activeGamesCount: espnData?.events?.length || 0,
+        sampleEvents: eventSnippet,
+      },
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  } catch (err: any) {
+    results.push({
+      name: 'ESPN Live Scoreboard & Odds API',
+      url: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
+      status: 'OFFLINE',
+      httpCode: 500,
+      latencyMs: Math.round(performance.now() - espnStart),
+      payloadPreview: { error: err?.message || 'Network fetch failed' },
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  }
+
+  // 2. Sleeper NFL State API
+  const sleeperStart = performance.now();
+  try {
+    const sleeperRes = await fetch('https://api.sleeper.app/v1/state/nfl');
+    const sleeperLatency = Math.round(performance.now() - sleeperStart);
+    const sleeperData = await sleeperRes.json();
+
+    results.push({
+      name: 'Sleeper NFL State API',
+      url: 'https://api.sleeper.app/v1/state/nfl',
+      status: sleeperRes.ok ? 'ONLINE' : 'OFFLINE',
+      httpCode: sleeperRes.status,
+      latencyMs: sleeperLatency,
+      payloadPreview: sleeperData,
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  } catch (err: any) {
+    results.push({
+      name: 'Sleeper NFL State API',
+      url: 'https://api.sleeper.app/v1/state/nfl',
+      status: 'OFFLINE',
+      httpCode: 500,
+      latencyMs: Math.round(performance.now() - sleeperStart),
+      payloadPreview: { error: err?.message || 'Network fetch failed' },
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  }
+
+  // 3. Open-Meteo Doppler Weather API (Arrowhead Stadium)
+  const weatherStart = performance.now();
+  try {
+    const weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=39.0489&longitude=-94.4839&current=temperature_2m,wind_speed_10m,wind_gusts_10m,precipitation&temperature_unit=fahrenheit&wind_speed_unit=mph';
+    const weatherRes = await fetch(weatherUrl);
+    const weatherLatency = Math.round(performance.now() - weatherStart);
+    const weatherData = await weatherRes.json();
+
+    results.push({
+      name: 'Open-Meteo Doppler Satellite Weather API',
+      url: weatherUrl,
+      status: weatherRes.ok ? 'ONLINE' : 'OFFLINE',
+      httpCode: weatherRes.status,
+      latencyMs: weatherLatency,
+      payloadPreview: {
+        stadium: 'Arrowhead Stadium (Kansas City)',
+        gps: '39.0489° N, 94.4839° W',
+        currentUnits: weatherData?.current_units,
+        liveReadings: weatherData?.current,
+      },
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  } catch (err: any) {
+    results.push({
+      name: 'Open-Meteo Doppler Satellite Weather API',
+      url: 'https://api.open-meteo.com/v1/forecast',
+      status: 'OFFLINE',
+      httpCode: 500,
+      latencyMs: Math.round(performance.now() - weatherStart),
+      payloadPreview: { error: err?.message || 'Network fetch failed' },
+      lastChecked: new Date().toLocaleTimeString(),
+    });
+  }
+
+  return results;
+}
+

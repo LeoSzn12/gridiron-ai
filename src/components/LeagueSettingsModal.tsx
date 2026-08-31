@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { LeagueSettings } from '../types';
-import { LEO_SZN_YAHOO_PRESET, STANDARD_PPR_PRESET } from '../data/mockData';
+import { LEO_SZN_YAHOO_PRESET, STANDARD_PPR_PRESET, HALF_PPR_10_PRESET, DFS_PROPS_PRESET } from '../data/mockData';
 import { 
   X, 
   Settings, 
@@ -36,6 +36,13 @@ export const LeagueSettingsModal: React.FC<LeagueSettingsModalProps> = ({
     onSaveSettings(currentSettings);
     onClose();
   };
+
+  const PRESETS = [
+    { preset: LEO_SZN_YAHOO_PRESET, label: 'Leo Szn 8-Team 3-QB (Yahoo Custom)', highlight: true },
+    { preset: STANDARD_PPR_PRESET, label: 'Standard 12-Team PPR' },
+    { preset: HALF_PPR_10_PRESET, label: '10-Team Half-PPR (Sleeper)' },
+    { preset: DFS_PROPS_PRESET, label: 'DFS & Props (PrizePicks / Underdog)' },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
@@ -73,28 +80,20 @@ export const LeagueSettingsModal: React.FC<LeagueSettingsModalProps> = ({
             <span className="text-emerald-400 text-[10px]">1-Click Sync</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => handleApplyPreset(LEO_SZN_YAHOO_PRESET)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold font-display flex items-center gap-2 border transition-all cursor-pointer ${
-                currentSettings.id === LEO_SZN_YAHOO_PRESET.id
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Leo Szn 8-Team 3-QB (Yahoo Custom)</span>
-            </button>
-
-            <button
-              onClick={() => handleApplyPreset(STANDARD_PPR_PRESET)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold font-display flex items-center gap-2 border transition-all cursor-pointer ${
-                currentSettings.id === STANDARD_PPR_PRESET.id
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700'
-              }`}
-            >
-              <span>Standard 12-Team PPR</span>
-            </button>
+            {PRESETS.map(({ preset, label, highlight }) => (
+              <button
+                key={preset.id}
+                onClick={() => handleApplyPreset(preset)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold font-display flex items-center gap-2 border transition-all cursor-pointer ${
+                  currentSettings.id === preset.id
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-700'
+                }`}
+              >
+                {highlight && <Sparkles className="w-4 h-4" />}
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
         </div>
 
