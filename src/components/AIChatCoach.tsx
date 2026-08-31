@@ -23,12 +23,16 @@ interface AIChatCoachProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  myRoster?: Player[];
+  opponentRoster?: Player[];
 }
 
 export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  myRoster = [],
+  opponentRoster = [],
 }) => {
   const [aiConfig, setAiConfig] = useState<AIProviderConfig>(getSavedAIConfig);
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -121,7 +125,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
     setIsTyping(true);
 
     try {
-      const aiResponse = await getAIChatResponseAsync(query, players, settings, aiConfig);
+      const aiResponse = await getAIChatResponseAsync(query, players, settings, aiConfig, myRoster, opponentRoster);
       setMessages(prev => [...prev, aiResponse]);
     } catch (err: any) {
       setMessages(prev => [
@@ -139,8 +143,9 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   };
 
   const quickPrompts = [
+    { label: '📋 Rate My Team', text: 'How is my team doing this week? Give me an overview of my roster.' },
+    { label: '⚡ Who Should I Start?', text: 'Who should I start in my optimal starting lineup?' },
     { label: '🎯 3-QB Draft Strategy', text: 'What is the best draft strategy for my 8-team 3-QB league?' },
-    { label: '⚡ Lamar vs Jayden Daniels', text: 'Should I start Lamar Jackson or Jayden Daniels?' },
     { label: '🚀 Top Waiver Wire Targets', text: 'Who are the best waiver wire pickups and free agents?' },
     { label: '🛡️ Top IDP Targets', text: 'Who are the top IDP defensive players to target?' },
     { label: '🌪️ Weather & Wind Traps', text: 'Which games have high winds or severe weather?' },

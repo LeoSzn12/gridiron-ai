@@ -17,12 +17,15 @@ import {
 
 import confetti from 'canvas-confetti';
 
+import { EmptyState } from './ui';
+
 interface DecisionEngineWarRoomProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
   onPinPlayer?: (player: Player) => void;
   pinnedPlayerIds?: string[];
+  myRosterIds?: string[];
 }
 
 import { PlayerFilterBar, type PlayerFilterState } from './PlayerFilterBar';
@@ -33,6 +36,7 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
   onSelectPlayerDetail,
   onPinPlayer,
   pinnedPlayerIds = [],
+  myRosterIds = [],
 }) => {
   // Weights State
   const [weights, setWeights] = useState<DecisionFactorWeights>({
@@ -88,6 +92,7 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
         }
 
         // Category filter
+        if (filterState.category === 'MY_ROSTER' && !myRosterIds.includes(d.playerId)) return false;
         if (filterState.category === 'SMASH' && d.alphaIndex < 85) return false;
         if (filterState.category === 'SIT' && d.alphaIndex >= 68) return false;
         if (filterState.category === 'INJURED' && originalPlayer.injuryStatus === 'HEALTHY') return false;
@@ -135,7 +140,7 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
         }
         return filterState.sortAscending ? -diff : diff;
       });
-  }, [players, settings, weights, filterState]);
+  }, [players, settings, weights, filterState, myRosterIds]);
 
 
   // Selected duel players
@@ -343,6 +348,15 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {playerDecisions.length === 0 && (
+              <div className="col-span-full">
+                <EmptyState
+                  title="No Players Match Your Filters"
+                  description="Try adjusting your position, team, or category filters to see players in the Alpha Index board."
+                  onResetFilters={() => setFilterState({ searchQuery: '', position: 'ALL', team: 'ALL', category: 'ALL', sortBy: 'ALPHA', sortAscending: false })}
+                />
+              </div>
+            )}
             {playerDecisions.map((dec) => {
               const originalPlayer = players.find(p => p.id === dec.playerId);
               const isPinned = pinnedPlayerIds.includes(dec.playerId);
@@ -605,9 +619,9 @@ export const DecisionEngineWarRoom: React.FC<DecisionEngineWarRoomProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-emerald-400" />
-                  <span>Real Sportsbook Line Comparison for {playerA.name}</span>
+                  <span>Estimated Sportsbook Line Comparison for {playerA.name}</span>
                 </h3>
-                <p className="text-xs text-slate-400">Live consensus lines from DraftKings, FanDuel, BetMGM, Caesars, and ESPN BET.</p>
+                <p className="text-xs text-slate-400">Estimated lines derived from base Vegas odds — not live sportsbook feeds. Use for directional comparison only.</p>
               </div>
 
               <select

@@ -27,12 +27,14 @@ interface StartSitToolProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  myRoster?: Player[];
 }
 
 export const StartSitTool: React.FC<StartSitToolProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  myRoster = [],
 }) => {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>(['lamar-jackson', 'jayden-daniels']);
   const [positionFilter, setPositionFilter] = useState<PlayerPosition | 'ALL'>('ALL');
@@ -87,15 +89,25 @@ export const StartSitTool: React.FC<StartSitToolProps> = ({
     return selectedPlayers.find(p => p.id === comparisonResult.recommendedPlayerId) || selectedPlayers[0];
   }, [comparisonResult, selectedPlayers]);
 
-  const presets = [
-    { label: 'QB: Lamar vs Jayden', ids: ['lamar-jackson', 'jayden-daniels'] },
-    { label: 'QB: Mahomes vs Josh Allen', ids: ['patrick-mahomes', 'josh-allen'] },
-    { label: 'RB: Saquon vs Bijan', ids: ['saquon-barkley', 'bijan-robinson'] },
-    { label: 'WR: Jefferson vs Chase', ids: ['justin-jefferson', 'ja-marr-chase'] },
-    { label: 'TE: Bowers vs Brian Thomas', ids: ['brock-bowers', 'brian-thomas-jr'] },
-    { label: 'IDP: Crosby vs T.J. Watt', ids: ['maxx-crosby', 'tj-watt'] },
-    { label: 'IDP: Warner vs Hamilton', ids: ['fred-warner', 'kyle-hamilton'] },
-  ];
+  const presets = useMemo(() => {
+    const list = [];
+    if (myRoster.length >= 2) {
+      list.push({
+        label: `⭐ My Team: ${myRoster[0].name.split(' ')[1] || myRoster[0].name} vs ${myRoster[1].name.split(' ')[1] || myRoster[1].name}`,
+        ids: [myRoster[0].id, myRoster[1].id],
+      });
+    }
+    return [
+      ...list,
+      { label: 'QB: Lamar vs Jayden', ids: ['lamar-jackson', 'jayden-daniels'] },
+      { label: 'QB: Mahomes vs Josh Allen', ids: ['patrick-mahomes', 'josh-allen'] },
+      { label: 'RB: Saquon vs Bijan', ids: ['saquon-barkley', 'bijan-robinson'] },
+      { label: 'WR: Jefferson vs Chase', ids: ['justin-jefferson', 'ja-marr-chase'] },
+      { label: 'TE: Bowers vs Brian Thomas', ids: ['brock-bowers', 'brian-thomas-jr'] },
+      { label: 'IDP: Crosby vs T.J. Watt', ids: ['maxx-crosby', 'tj-watt'] },
+      { label: 'IDP: Warner vs Hamilton', ids: ['fred-warner', 'kyle-hamilton'] },
+    ];
+  }, [myRoster]);
 
   return (
     <div className="space-y-6">

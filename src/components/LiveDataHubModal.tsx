@@ -15,6 +15,7 @@ import {
   fetchSleeperTrending,
   convertSleeperLeagueToSettings
 } from '../services/sleeperService';
+import { syncRostersFromSleeper } from '../services/rosterService';
 import { 
   X, 
   Radio, 
@@ -36,6 +37,7 @@ interface LiveDataHubModalProps {
   settings: LeagueSettings;
   onUpdatePlayers: (updatedPlayers: Player[]) => void;
   onUpdateLeagueSettings?: (settings: LeagueSettings) => void;
+  onUpdateRosterIds?: (myIds: string[], oppIds: string[], userTeamName: string, oppTeamName: string) => void;
 }
 
 export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
@@ -45,6 +47,7 @@ export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
   settings,
   onUpdatePlayers,
   onUpdateLeagueSettings,
+  onUpdateRosterIds,
 }) => {
   const [activeTab, setActiveTab] = useState<'sleeper' | 'espn' | 'telemetry'>('sleeper');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -131,12 +134,23 @@ export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
     setIsSyncing(true);
     try {
       const allSleeperPlayers = await fetchSleeperNFLPlayers();
-      const { hydratedPlayers } = await fetchSleeperLeagueRosters(league.league_id, allSleeperPlayers);
+      const { rosters, hydratedPlayers } = await fetchSleeperLeagueRosters(league.league_id, allSleeperPlayers);
       
       // Update league settings
       const newSettings = convertSleeperLeagueToSettings(league, sleeperUsername || 'My Team');
       if (onUpdateLeagueSettings) {
         onUpdateLeagueSettings(newSettings);
+      }
+
+      // Sync user and opponent rosters
+      const syncedRosters = syncRostersFromSleeper(rosters, undefined, sleeperUsername);
+      if (onUpdateRosterIds) {
+        onUpdateRosterIds(
+          syncedRosters.myRosterIds,
+          syncedRosters.opponentRosterIds,
+          syncedRosters.userTeamName,
+          syncedRosters.opponentTeamName
+        );
       }
 
       // If hydrated players found, update players list
@@ -150,7 +164,7 @@ export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
         origin: { y: 0.6 },
       });
 
-      setSyncStatusMsg(`✅ Successfully imported "${league.name}"! Loaded ${hydratedPlayers.length} rostered players and active scoring.`);
+      setSyncStatusMsg(`✅ Successfully imported "${league.name}"! Loaded ${hydratedPlayers.length} rostered players and active scoring for "${syncedRosters.userTeamName}".`);
     } catch (err: any) {
       setSyncStatusMsg(`Import failed: ${err.message}`);
     } finally {

@@ -17,6 +17,7 @@ interface TradeAnalyzerProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail: (player: Player) => void;
+  myRoster?: Player[];
 }
 
 interface DraftPickAsset {
@@ -38,6 +39,7 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
   players,
   settings,
   onSelectPlayerDetail,
+  myRoster = [],
 }) => {
   // Trade Setup
   const [tradeMode, setTradeMode] = useState<'2-team' | '3-team'>('2-team');
@@ -134,12 +136,23 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
     });
   };
 
-  const tradePresets = [
-    { label: '🔥 Mahomes + Brian Thomas ⇄ Saquon', a: ['patrick-mahomes', 'brian-thomas-jr'], b: ['saquon-barkley'] },
-    { label: '⚖️ Lamar Jackson ⇄ CeeDee Lamb', a: ['lamar-jackson'], b: ['ceedee-lamb'] },
-    { label: '⚡ Josh Allen + Brock Bowers ⇄ Bijan + Kittle', a: ['josh-allen', 'brock-bowers'], b: ['bijan-robinson', 'george-kittle'] },
-    { label: '🛡️ T.J. Watt + Jayden Daniels ⇄ Maxx Crosby + Jaylen Daniels', a: ['tj-watt', 'jayden-daniels'], b: ['maxx-crosby', 'jayden-daniels'] },
-  ];
+  const tradePresets = useMemo(() => {
+    const list = [];
+    if (myRoster.length >= 2) {
+      list.push({
+        label: `⭐ Trade ${myRoster[0].name.split(' ')[1] || myRoster[0].name} for Top RB`,
+        a: [myRoster[0].id],
+        b: ['saquon-barkley'],
+      });
+    }
+    return [
+      ...list,
+      { label: '🔥 Mahomes + Brian Thomas ⇄ Saquon', a: ['patrick-mahomes', 'brian-thomas-jr'], b: ['saquon-barkley'] },
+      { label: '⚡ Lamar Jackson ⇄ Justin Jefferson + Pick', a: ['lamar-jackson'], b: ['justin-jefferson'] },
+      { label: '📈 Brock Bowers ⇄ Derrick Henry', a: ['brock-bowers'], b: ['derrick-henry'] },
+      { label: '🛡️ Maxx Crosby (IDP) ⇄ Jayden Daniels', a: ['maxx-crosby'], b: ['jayden-daniels'] },
+    ];
+  }, [myRoster]);
 
   return (
     <div className="space-y-6">

@@ -13,6 +13,7 @@ interface ActionCenterCardProps {
   onOpenWeather: () => void;
   onOpenWaivers: () => void;
   onSelectPlayerDetail: (player: Player) => void;
+  myRoster?: Player[];
 }
 
 export const ActionCenterCard: React.FC<ActionCenterCardProps> = ({
@@ -22,28 +23,33 @@ export const ActionCenterCard: React.FC<ActionCenterCardProps> = ({
   onOpenWeather,
   onOpenWaivers,
   onSelectPlayerDetail,
+  myRoster = [],
 }) => {
   // Dynamically compute high-priority gameday action items
   const alerts: ActionCenterAlert[] = useMemo(() => {
     const list: ActionCenterAlert[] = [];
+    const myIds = new Set(myRoster.map(p => p.id));
+    const targetPool = myRoster.length > 0 ? myRoster : players;
 
     // 1. Injury Alerts
-    const injuredStarters = players.filter(
+    const injuredStarters = targetPool.filter(
       p => p.injuryStatus !== 'HEALTHY'
     );
 
     injuredStarters.forEach(p => {
-      // Find healthy replacement in same position
-      const replacement = players.find(
+      // Find healthy replacement in same position from roster or available pool
+      const replacement = (myRoster.length > 0 ? myRoster : players).find(
         r => r.position === p.position && r.injuryStatus === 'HEALTHY' && r.id !== p.id
       );
+
+      const isOwned = myIds.has(p.id);
 
       list.push({
         id: `inj-${p.id}`,
         type: 'INJURY',
         severity: p.injuryStatus === 'OUT' || p.injuryStatus === 'IR' ? 'URGENT' : 'HIGH',
-        title: `🚨 Injury Alert: ${p.name} (${p.injuryStatus})`,
-        description: p.injuryNote || `${p.name} is listed as ${p.injuryStatus}. Consider starting ${replacement?.name || 'bench backup'} for guaranteed touches.`,
+        title: isOwned ? `🚨 Your Roster: ${p.name} is ${p.injuryStatus}` : `🚨 Injury Alert: ${p.name} (${p.injuryStatus})`,
+        description: p.injuryNote || `${p.name} is designated as ${p.injuryStatus}. Consider swapping to ${replacement?.name || 'a healthy reserve'} for guaranteed touch volume.`,
         primaryActionLabel: replacement ? `Swap with ${replacement.name}` : 'Review Position',
         player: p,
         replacementPlayer: replacement,
@@ -51,8 +57,8 @@ export const ActionCenterCard: React.FC<ActionCenterCardProps> = ({
       });
     });
 
-    // 2. High Wind / Weather Traps
-    const severeWeatherPlayers = players.filter(
+    // 2. High Wind / Weather Traps (prioritize user roster)
+    const severeWeatherPlayers = (myRoster.length > 0 ? myRoster : players).filter(
       p => !p.weather.isDome && p.weather.windSpeed >= 12 && (p.position === 'QB' || p.position === 'WR' || p.position === 'K')
     );
 
@@ -102,7 +108,7 @@ export const ActionCenterCard: React.FC<ActionCenterCardProps> = ({
     }
 
     return list;
-  }, [players]);
+  }, [players, myRoster]);
 
   return (
     <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0c1326] via-[#090e1d] to-[#040711] border border-slate-700/80 p-5 sm:p-6 shadow-2xl space-y-4">

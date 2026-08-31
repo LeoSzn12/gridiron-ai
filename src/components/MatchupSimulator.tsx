@@ -17,33 +17,40 @@ interface MatchupSimulatorProps {
   players: Player[];
   settings: LeagueSettings;
   onSelectPlayerDetail?: (player: Player) => void;
+  myRoster?: Player[];
+  opponentRoster?: Player[];
 }
 
 export const MatchupSimulator: React.FC<MatchupSimulatorProps> = ({
   players,
   settings,
+  myRoster = [],
+  opponentRoster = [],
 }) => {
   const [selectedOpponentId, setSelectedOpponentId] = useState<string>('team-1');
   const [simIterations] = useState<number>(10000);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
-
   // User Roster
   const userTeam = LEAGUE_TEAMS_ROSTERS.find(t => t.isUser) || LEAGUE_TEAMS_ROSTERS[2];
   const userRoster = useMemo(() => {
+    if (myRoster && myRoster.length > 0) return myRoster.slice(0, 9);
     return userTeam.roster.length > 0 ? userTeam.roster : players.slice(0, 9);
-  }, [userTeam, players]);
+  }, [myRoster, userTeam, players]);
 
   // Opponent Roster
   const opponentTeam = LEAGUE_TEAMS_ROSTERS.find(t => t.id === selectedOpponentId) || LEAGUE_TEAMS_ROSTERS[0];
-  const opponentRoster = useMemo(() => {
+  const activeOpponentRoster = useMemo(() => {
+    if (selectedOpponentId === 'active-opp' && opponentRoster && opponentRoster.length > 0) {
+      return opponentRoster.slice(0, 9);
+    }
     return opponentTeam.roster.length > 0 ? opponentTeam.roster : players.slice(4, 13);
-  }, [opponentTeam, players]);
+  }, [selectedOpponentId, opponentRoster, opponentTeam, players]);
 
   // Monte Carlo Simulation Result
   const simResult: MonteCarloSimulationResult = useMemo(() => {
-    return runMonteCarloSimulation(userRoster, opponentRoster, settings, simIterations);
-  }, [userRoster, opponentRoster, settings, simIterations]);
+    return runMonteCarloSimulation(userRoster, activeOpponentRoster, settings, simIterations);
+  }, [userRoster, activeOpponentRoster, settings, simIterations]);
 
   const handleRerunSim = () => {
     setIsSimulating(true);

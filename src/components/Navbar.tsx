@@ -18,7 +18,8 @@ import {
   Radio, 
   BrainCircuit,
   LayoutGrid,
-  ChevronDown
+  ChevronDown,
+  Target
 } from 'lucide-react';
 import type { LeagueSettings } from '../types';
 import type { LiveNFLGameScore } from '../services/liveDataService';
@@ -45,6 +46,7 @@ const NAVIGATION_CATEGORIES: NavCategory[] = [
     label: '🏟️ Lineup & Decisions',
     accentColor: 'emerald',
     tools: [
+      { id: 'hq', label: 'Sunday Morning HQ', desc: 'Personalized Gameday Command Center & Win Probability', icon: Sparkles, badge: 'My Team HQ' },
       { id: 'war-room', label: 'Decision War Room', desc: '5-Factor Composite Alpha Index & Arbiter', icon: BrainCircuit, badge: '5-Factor AI' },
       { id: 'start-sit', label: 'Start / Sit AI Studio', desc: 'Head-to-Head Player Duel Evaluator', icon: Zap, badge: 'Smart' },
       { id: 'sim', label: 'Monte Carlo Matchup', desc: '10,000 Simulation Win Probability Engine', icon: BarChart3, badge: '10,000 Sims' },
@@ -76,6 +78,7 @@ const NAVIGATION_CATEGORIES: NavCategory[] = [
     label: '📊 Odds & Scheme Lab',
     accentColor: 'gold',
     tools: [
+      { id: 'props-lab', label: 'Props Edge Detector (DFS)', desc: 'PrizePicks & Underdog OVER/UNDER Edge Finder', icon: Target, badge: 'DFS Props' },
       { id: 'vegas-hub', label: 'Vegas Odds & Props Hub', desc: 'Sportsbook Lines, Spreads & Over/Unders', icon: DollarSign, badge: 'Vegas' },
       { id: 'matchups', label: 'Matchup & DvP Matrix', desc: '32-Team Defensive EPA & Vulnerabilities', icon: ShieldCheck, badge: 'EPA' },
       { id: 'metrics', label: 'Advanced Coaching Lab', desc: 'PROE, Neutral Pace & Receiver Schemes', icon: Activity, badge: 'PFF & Scheme' },
@@ -334,8 +337,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Quick-Access Top Category Hub Bar */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1 justify-end">
-            {allTools.slice(0, 7).map(tool => {
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1 justify-end no-scrollbar scroll-smooth">
+            {allTools.slice(0, 8).map(tool => {
               const Icon = tool.icon;
               const isActive = activeTab === tool.id;
               return (

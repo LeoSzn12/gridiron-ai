@@ -36,23 +36,48 @@ export function saveAIConfig(config: AIProviderConfig): void {
 /**
  * Builds the comprehensive fantasy football system context for LLM generation
  */
-function buildSystemPrompt(players: Player[], settings: LeagueSettings): string {
-  const topPlayersSummary = players.slice(0, 30).map(p => {
+function buildSystemPrompt(
+  players: Player[], 
+  settings: LeagueSettings,
+  myRoster?: Player[],
+  opponentRoster?: Player[]
+): string {
+  const topPlayersSummary = players.slice(0, 25).map(p => {
     const proj = calculateProjection(p, settings);
     return `- ${p.name} (${p.position} - ${p.team}, vs ${p.opponent}): Proj ${proj.projectedPoints} pts (Floor ${proj.floor}, Ceiling ${proj.ceiling}), Implied Total ${p.vegas.impliedTeamTotal}, Weather: ${p.weather.summary}, Status: ${p.injuryStatus}`;
   }).join('\n');
 
+  const myRosterSummary = myRoster && myRoster.length > 0 
+    ? myRoster.map(p => {
+        const proj = calculateProjection(p, settings);
+        return `* [MY ROSTER] ${p.name} (${p.position} - ${p.team}, vs ${p.opponent}): Proj ${proj.projectedPoints} pts, Status: ${p.injuryStatus}, Weather: ${p.weather.riskLevel}`;
+      }).join('\n')
+    : 'No active user roster loaded.';
+
+  const oppRosterSummary = opponentRoster && opponentRoster.length > 0
+    ? opponentRoster.slice(0, 9).map(p => {
+        const proj = calculateProjection(p, settings);
+        return `* [OPPONENT] ${p.name} (${p.position} - ${p.team}): Proj ${proj.projectedPoints} pts`;
+      }).join('\n')
+    : 'No opponent roster loaded.';
+
   return `You are Gridiron AI, an expert NFL Fantasy Football Strategist & Mathematical Lineup Analyst.
-Active League: "${settings.name}"
+Active League: "${settings.name}" (${settings.userTeamName})
 League Scoring & Rules:
 - Format: ${settings.numTeams} Teams, ${settings.roster.qb} Starting QBs, ${settings.roster.rb} Starting RBs, ${settings.roster.wr} Starting WRs, ${settings.roster.te} TEs
 - Scoring Scale: Passing = ${settings.offense.passYardsPerPoint} yds/pt (${settings.offense.passTouchdown}pt Pass TD), Rushing/Receiving = ${settings.offense.rushYardsPerPoint} yds/pt (${settings.offense.rushTouchdown}pt TD), PPR = ${settings.offense.receptionsPPR} pts/rec.
 
-Top Ingested Players & Live Projections:
+User's Active Team Roster (${myRoster?.length || 0} players):
+${myRosterSummary}
+
+Opponent's Team Roster:
+${oppRosterSummary}
+
+League Top Players & Projections:
 ${topPlayersSummary}
 
 Instructions:
-1. Provide concise, high-conviction, mathematically grounded fantasy football advice.
+1. Provide concise, high-conviction, mathematically grounded fantasy football advice tailored specifically to the user's roster when applicable.
 2. Directly answer start/sit, trade, waiver wire, weather, and draft questions.
 3. Highlight floor vs ceiling, Vegas implied totals, and 3-QB positional scarcity.
 4. Format responses cleanly using markdown headers (###), bullet points, and bold text.`;
@@ -66,9 +91,11 @@ async function callGeminiAPI(
   players: Player[], 
   settings: LeagueSettings, 
   apiKey: string, 
-  modelName: string = 'gemini-1.5-flash'
+  modelName: string = 'gemini-1.5-flash',
+  myRoster?: Player[],
+  opponentRoster?: Player[]
 ): Promise<string> {
-  const systemPrompt = buildSystemPrompt(players, settings);
+  const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
@@ -109,9 +136,11 @@ async function callLocalLLM(
   players: Player[],
   settings: LeagueSettings,
   endpointUrl: string = 'http://localhost:11434/v1',
-  modelName: string = 'llama3'
+  modelName: string = 'llama3',
+  myRoster?: Player[],
+  opponentRoster?: Player[]
 ): Promise<string> {
-  const systemPrompt = buildSystemPrompt(players, settings);
+  const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
   const cleanEndpoint = endpointUrl.replace(/\/+$/, '');
   const url = `${cleanEndpoint}/chat/completions`;
 
@@ -145,14 +174,48 @@ async function callLocalLLM(
 function generateHeuristicResponse(
   query: string, 
   players: Player[], 
-  settings: LeagueSettings
+  settings: LeagueSettings,
+  myRoster?: Player[],
+  _opponentRoster?: Player[]
 ): ChatMessage {
   const cleanQuery = query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
   const tokens = cleanQuery.split(/\s+/).filter(Boolean);
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const messageId = `msg-${Math.floor(Math.random() * 1000000)}`;
 
-  // 1. Fuzzy matching players mentioned
+  const activeRoster = (myRoster && myRoster.length > 0) ? myRoster : players.slice(0, 15);
+
+  // 1. Roster Review / My Team query ("how is my team doing", "my team", "roster review", "team overview")
+  if (tokens.some(t => ['team', 'myteam', 'roster', 'review', 'squad', 'lineup', 'outlook'].includes(t)) && 
+      (tokens.includes('my') || tokens.includes('how') || tokens.includes('rate') || tokens.includes('check'))) {
+    
+    const userStarters = activeRoster.slice(0, 9);
+    const totalProj = userStarters.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0);
+    const injured = activeRoster.filter(p => p.injuryStatus !== 'HEALTHY');
+
+    const topAsset = [...activeRoster].sort((a, b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+
+    return {
+      id: messageId,
+      sender: 'ai',
+      text: `### 📋 Roster Intelligence Briefing for **${settings.userTeamName}**\n\n` +
+        `**Projected Starting Total:** **${totalProj.toFixed(1)} pts** across your starting slots.\n` +
+        `**Top Projected Anchor:** **${topAsset?.name || 'Lamar Jackson'}** (${calculateProjection(topAsset || activeRoster[0], settings).projectedPoints} pts)\n\n` +
+        `**Active Status & Health:**\n` +
+        (injured.length > 0 
+          ? `• ⚠️ **${injured.length} Injury Flags:** ${injured.map(i => `${i.name} (${i.injuryStatus})`).join(', ')}\n`
+          : `• ✅ **Clean Bill of Health:** All starters designated healthy.\n`) +
+        `• 🌪️ **Weather Check:** ${activeRoster.filter(p => !p.weather.isDome && p.weather.windSpeed >= 12).length} players facing >12 mph winds.\n\n` +
+        `> **Tactical Advice:** Lock in your high-touch goal line rushers to leverage the 6-point touchdown scoring format.`,
+      timestamp,
+      dataBadges: [
+        { label: 'Projected', value: `${totalProj.toFixed(1)} pts`, type: 'positive' },
+        { label: 'Health', value: injured.length > 0 ? `${injured.length} Injured` : 'All Healthy', type: injured.length > 0 ? 'warning' : 'positive' },
+      ],
+    };
+  }
+
+  // 2. Fuzzy matching players mentioned
   const mentioned = players.filter(p => {
     const pName = p.name.toLowerCase();
     const pFirst = p.name.split(' ')[0].toLowerCase();
@@ -219,10 +282,10 @@ function generateHeuristicResponse(
     };
   }
 
-  // 2. Start / Sit Intent (handles typos like "who shouldI is atrt", "who to start", "start sit")
+  // 3. Start / Sit Intent
   const isStartSitIntent = tokens.some(t => ['start', 'sit', 'atrt', 'strt', 'lineup', 'who', 'bench'].includes(t));
   if (isStartSitIntent) {
-    const optimal = solveOptimalLineup(players, players.slice(0, 15), settings, 'BALANCED_ALPHA');
+    const optimal = solveOptimalLineup(activeRoster, activeRoster, settings, 'BALANCED_ALPHA');
     const topStarters = optimal.starters.slice(0, 6).map(p => {
       const pr = calculateProjection(p, settings);
       return `• **${p.name}** (${p.position} - ${p.team}): **${pr.projectedPoints} pts** (Floor: ${pr.floor} pts, Vegas: ${p.vegas.impliedTeamTotal} pts)`;
@@ -236,7 +299,7 @@ function generateHeuristicResponse(
         `${topStarters}\n\n` +
         `**Key Tactical Advice:**\n` +
         `1. **Lock In High-Touch Goal Line Assets:** In a 50 yd/pt format, 6pt rushing/receiving touchdowns account for over 65% of total weekly fantasy output.\n` +
-        `2. **Start QBs with High Vegas Totals:** Lamar Jackson, Josh Allen, and Jayden Daniels have the highest projected median outcomes this week.\n` +
+        `2. **Start QBs with High Vegas Totals:** High implied totals create maximum touchdown probability.\n` +
         `3. **Weather Check:** Avoid starting deep-threat pass catchers facing >15 mph wind drag.`,
       timestamp,
       dataBadges: [
@@ -247,7 +310,7 @@ function generateHeuristicResponse(
     };
   }
 
-  // 3. Draft Intent
+  // 4. Draft Intent
   if (tokens.some(t => ['draft', 'drft', 'mock', 'pick', 'rounds', 'vorp'].includes(t))) {
     return {
       id: messageId,
@@ -255,7 +318,7 @@ function generateHeuristicResponse(
       text: `### 🎯 AI Draft Strategy for **${settings.name}**\n\n` +
         `In an **${settings.numTeams}-team league with ${settings.roster.qb} starting QBs (24 starting QBs in the league)**:\n\n` +
         `1. **QB Scarcity is Astronomical**: 75% of starting NFL QBs are starting every week. You must draft **2 top-10 QBs in your first 3 rounds** (e.g. Lamar Jackson, Josh Allen, Jayden Daniels).\n` +
-        `2. **Touchdowns Rule the 50 yd/pt Scale**: Because passing yards are 50 yds/pt and rushing/receiving is 20 yds/pt, 6-point touchdowns represent over 65% of total fantasy output! Target redzone goal-line rushers (Saquon Barkley, Derrick Henry) and dual-threat QBs.\n` +
+        `2. **Touchdowns Rule the 50 yd/pt Scale**: Because passing yards are 50 yds/pt and rushing/receiving is 20 yds/pt, 6-point touchdowns represent over 65% of total fantasy output!\n` +
         `3. **5 Starting WRs Requirement**: You need 40 starting WRs drafted across 8 teams. Do not ignore WR depth in rounds 4–8.\n` +
         `4. **IDP Targets**: Lock in elite edge rushers with 2.0 sack scoring (Maxx Crosby, T.J. Watt) in rounds 7–10.`,
       timestamp,
@@ -266,7 +329,7 @@ function generateHeuristicResponse(
     };
   }
 
-  // 4. Waiver Wire Intent
+  // 5. Waiver Wire Intent
   if (tokens.some(t => ['waiver', 'wire', 'faab', 'pickup', 'freagent', 'add', 'drop'].includes(t))) {
     const topWaiver = players.filter(p => p.isWaiverTarget).slice(0, 3);
     const waiverList = topWaiver.map(p => `• **${p.name}** (${p.position} - ${p.team}): Recommended **${p.faabRecommendedPct}% FAAB** bid. Snap share surging.`).join('\n');
@@ -294,6 +357,7 @@ function generateHeuristicResponse(
       `I am actively calibrated to your exact league rules: **${settings.numTeams} Teams • ${settings.roster.qb} Starting QBs • ${settings.roster.wr} Starting WRs • 50 Pass Yds/Pt • 6pt Pass TDs**.\n\n` +
       `**How I can help you:**\n` +
       `• **Start / Sit Decisions:** Ask *"Should I start Lamar Jackson or Jayden Daniels?"* or *"Who should I start?"*\n` +
+      `• **Roster Check:** Ask *"How is my team doing this week?"*\n` +
       `• **Draft Strategy:** Ask *"What is the best draft strategy for my 3-QB league?"*\n` +
       `• **Waiver & FAAB:** Ask *"Who are the best waiver pickups this week?"*\n` +
       `• **Trades & Rest of Season:** Ask *"Should I trade Patrick Mahomes for Saquon Barkley?"*`,
@@ -312,7 +376,9 @@ export async function getAIChatResponseAsync(
   query: string,
   players: Player[],
   settings: LeagueSettings,
-  config: AIProviderConfig = getSavedAIConfig()
+  config: AIProviderConfig = getSavedAIConfig(),
+  myRoster?: Player[],
+  opponentRoster?: Player[]
 ): Promise<ChatMessage> {
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const messageId = `msg-${Math.floor(Math.random() * 1000000)}`;
@@ -320,7 +386,7 @@ export async function getAIChatResponseAsync(
   // 1. Google Gemini API
   if (config.provider === 'gemini' && config.apiKey?.trim()) {
     try {
-      const generatedText = await callGeminiAPI(query, players, settings, config.apiKey.trim(), config.modelName);
+      const generatedText = await callGeminiAPI(query, players, settings, config.apiKey.trim(), config.modelName, myRoster, opponentRoster);
       return {
         id: messageId,
         sender: 'ai',
@@ -339,7 +405,7 @@ export async function getAIChatResponseAsync(
   // 2. Local LLM (Ollama / LM Studio)
   if (config.provider === 'local-llm' && config.localEndpoint?.trim()) {
     try {
-      const generatedText = await callLocalLLM(query, players, settings, config.localEndpoint.trim(), config.modelName || 'llama3');
+      const generatedText = await callLocalLLM(query, players, settings, config.localEndpoint.trim(), config.modelName || 'llama3', myRoster, opponentRoster);
       return {
         id: messageId,
         sender: 'ai',
@@ -356,5 +422,5 @@ export async function getAIChatResponseAsync(
   }
 
   // 3. Fallback to rich Neural Heuristic NLP Solver
-  return generateHeuristicResponse(query, players, settings);
+  return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
 }

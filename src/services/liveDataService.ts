@@ -196,10 +196,24 @@ export async function fetchSleeperNFLState(): Promise<{ week: number; season: st
 }
 
 // 4. Update Database with Real Live Weather & NFL Odds
+// Uses game-location stadium: home team's venue for accurate weather.
 export async function syncLivePlayerData(players: Player[] = PLAYERS_DATABASE): Promise<Player[]> {
+  // Cache weather by stadium to avoid duplicate API calls for same venue
+  const weatherCache = new Map<string, Partial<PlayerWeather> | null>();
+
   const updatedPlayers = await Promise.all(
     players.map(async (player) => {
-      const weatherUpdate = await fetchLiveStadiumWeather(player.team);
+      // Determine the game-location stadium team abbreviation:
+      // - Home games: use the player's own team
+      // - Away games: use the opponent's team (that's where the game is played)
+      const gameStadiumTeam = player.isHome ? player.team : player.opponent.replace(/^(vs |@ )/, '');
+      const stadiumKey = gameStadiumTeam || player.team;
+
+      if (!weatherCache.has(stadiumKey)) {
+        weatherCache.set(stadiumKey, await fetchLiveStadiumWeather(stadiumKey));
+      }
+
+      const weatherUpdate = weatherCache.get(stadiumKey);
       if (weatherUpdate) {
         return {
           ...player,

@@ -449,26 +449,121 @@ export function runMonteCarloSimulation(
   };
 }
 
-// Generate Personalized Audio Briefing Script
+// Generate Personalized Audio Briefing Script (Fully Dynamic)
 export function generateAudioBriefing(
-  _players: Player[],
+  players: Player[],
   settings: LeagueSettings = LEO_SZN_YAHOO_PRESET
 ): AudioBriefingScript {
+  const projections = players.map(p => ({ player: p, proj: calculateProjection(p, settings) }));
 
+  // Find top QB by projected points
+  const topQBs = projections
+    .filter(({ player }) => player.position === 'QB')
+    .sort((a, b) => b.proj.projectedPoints - a.proj.projectedPoints);
+  const topQB = topQBs[0];
+  const secondQB = topQBs[1];
+
+  // Find top RB by anytime TD probability
+  const topRBs = projections
+    .filter(({ player }) => player.position === 'RB')
+    .sort((a, b) => {
+      const probA = oddsToProbability(a.player.vegas.props.anytimeTDOdds);
+      const probB = oddsToProbability(b.player.vegas.props.anytimeTDOdds);
+      return probB - probA;
+    });
+  const topRB = topRBs[0];
+
+  // Find weather alerts (high wind outdoor games)
+  const weatherAlerts = players
+    .filter(p => !p.weather.isDome && p.weather.windSpeed >= 14)
+    .sort((a, b) => b.weather.windSpeed - a.weather.windSpeed);
+  const weatherAlert = weatherAlerts[0];
+
+  // Find top waiver pickup
+  const topWaiver = players
+    .filter(p => p.isWaiverTarget)
+    .sort((a, b) => b.faabRecommendedPct - a.faabRecommendedPct)[0];
+
+  // Build total projected points for estimated win probability
+  const starterCount = settings.roster.qb + settings.roster.rb + settings.roster.wr + settings.roster.te + settings.roster.k + settings.roster.def + settings.roster.dl + settings.roster.lb + settings.roster.db;
+  const topStarters = projections.sort((a, b) => b.proj.projectedPoints - a.proj.projectedPoints).slice(0, Math.min(starterCount, projections.length));
+  const totalProjected = topStarters.reduce((sum, s) => sum + s.proj.projectedPoints, 0);
+  const estimatedWinPct = Math.min(85, Math.max(45, Math.round(50 + (totalProjected - 120) * 0.3)));
+
+  const paragraphs: string[] = [];
+
+  // Paragraph 1: Opening
+  paragraphs.push(
+    `Good morning! Welcome to your personalized Gridiron AI Gameday Briefing for ${settings.userTeamName}. ` +
+    `We've synthesized all overnight betting movements, Doppler radar wind readings, and defensive pressure metrics ` +
+    `tailored for your ${settings.numTeams}-team ${settings.roster.qb}-QB custom league on ${settings.platform}.`
+  );
+
+  // Paragraph 2: QB Strategy
+  if (topQB && secondQB) {
+    const qbVorp = topQB.proj.vorpValue;
+    paragraphs.push(
+      `Quarterback Strategy: In your ${settings.roster.qb}-QB format, starting ${settings.roster.qb * settings.numTeams} quarterbacks across the league creates ` +
+      `significant positional scarcity. ${topQB.player.name} and ${secondQB.player.name} lead our VORP ratings. ` +
+      `${topQB.player.name} faces ${topQB.player.opponent} in a ${topQB.player.vegas.overUnder} over-under game, ` +
+      `projecting for ${topQB.proj.projectedPoints} points with a VORP of plus-${Math.abs(qbVorp).toFixed(1)}. ` +
+      (topQB.proj.verdict === 'SMASH START' ? `He's our number one overall play of the week.` : `He's a strong start with high confidence.`)
+    );
+  } else if (topQB) {
+    paragraphs.push(
+      `Quarterback Strategy: ${topQB.player.name} leads your quarterback rankings this week, ` +
+      `projecting for ${topQB.proj.projectedPoints} points against ${topQB.player.opponent}. ` +
+      `Lock him in as your QB1.`
+    );
+  }
+
+  // Paragraph 3: RB/Ground Game
+  if (topRB) {
+    const tdOdds = topRB.player.vegas.props.anytimeTDOdds;
+    paragraphs.push(
+      `Over on the ground: ${topRB.player.name} enters with a ${tdOdds} anytime touchdown line against ${topRB.player.opponent}. ` +
+      `Because your league awards ${settings.offense.rushTouchdown} points for touchdowns against ${settings.offense.rushYardsPerPoint} yards per point, ` +
+      `goal-line volume is paramount. ${topRB.player.name} projects for ${topRB.proj.projectedPoints} points — ` +
+      (topRB.proj.verdict === 'SMASH START' ? `an elite smash start.` : `a solid play in your lineup.`)
+    );
+  }
+
+  // Paragraph 4: Weather Alert (conditional)
+  if (weatherAlert) {
+    paragraphs.push(
+      `Weather Alert: Keep a close eye on ${weatherAlert.team} at ${weatherAlert.weather.stadiumName}. ` +
+      `Sustained ${weatherAlert.weather.windSpeed}-mile-per-hour winds` +
+      (weatherAlert.weather.windGust > weatherAlert.weather.windSpeed ? ` with gusts up to ${weatherAlert.weather.windGust}` : ``) +
+      ` are expected. Expect that offense to lean into short-area routes and the running game. ` +
+      (weatherAlert.weather.precipitation !== 'None' ? `${weatherAlert.weather.precipitation} is also in the forecast, further suppressing pass volume.` : ``)
+    );
+  } else {
+    // No weather concerns
+    paragraphs.push(
+      `Weather check: All stadiums are reporting favorable conditions this week. No significant wind or precipitation flags to worry about for your lineup.`
+    );
+  }
+
+  // Paragraph 5: Waiver + Closing
+  const closingParts: string[] = [];
+  if (topWaiver) {
+    closingParts.push(
+      `Waiver wire note: ${topWaiver.name} is the top trending pickup this week with a recommended ${topWaiver.faabRecommendedPct}% FAAB bid.`
+    );
+  }
+  closingParts.push(
+    `Final simulation check: Your roster projects approximately ${totalProjected.toFixed(0)} total points with an estimated ${estimatedWinPct}% win probability this week. ` +
+    `Lock in your starters and let's bring home the win!`
+  );
+  paragraphs.push(closingParts.join(' '));
 
   return {
     title: `Gridiron Daily Gameday Briefing for ${settings.userTeamName}`,
-    timestamp: 'Today at 7:00 AM EST',
-    durationSeconds: 145,
+    timestamp: `Today at ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
+    durationSeconds: Math.round(paragraphs.join(' ').split(' ').length / 2.5), // ~2.5 words/sec spoken
     hostName: 'Coach Marcus (Gridiron Neural AI)',
     leagueContext: `${settings.numTeams}-Team • ${settings.roster.qb}-QB Custom Scoring (${settings.platform})`,
-    paragraphs: [
-      `Good morning Leo! Welcome to your personalized Gridiron AI Gameday Briefing. We've synthesized all overnight betting movements from Las Vegas, Doppler radar wind readings, and defensive pressure metrics tailored for your 8-team 3-QB custom league.`,
-      `First up: Quarterback Strategy. In your 3-QB format, starting 24 quarterbacks across the league creates unprecedented positional scarcity. Lamar Jackson and Josh Allen lead our VORP ratings with a massive plus-17 point advantage over baseline replacement. Lamar faces the Bengals in a 52.5 over/under shootout, making him our undisputed number one overall play of the week.`,
-      `Over on the ground: Saquon Barkley enters Dallas with a minus-165 anytime touchdown line. Because your league awards 6 points for touchdowns against 20 yards per point, goal-line volume represents over 68% of fantasy production. Barkley is an elite smash start.`,
-      `Weather Alert: Keep a close eye on Denver at Kansas City. Arrowhead Stadium is tracking sustained 17-mile-per-hour winds with rain gusts up to 24. Expect Kansas City to lean heavily into short-area crossing routes and running back carries.`,
-      `Final simulation check: Our 10,000-iteration Monte Carlo engine gives your roster a 74.2% projected win probability this week. Lock in your starters and let's bring home the win!`,
-    ],
+    paragraphs,
   };
 }
 
@@ -698,7 +793,10 @@ export function calculateCompositeDecision(
   };
 }
 
-// Multi-Sportsbook Odds Comparison Engine
+// Simulated Multi-Sportsbook Odds Comparison Engine
+// NOTE: These lines are algorithmically estimated variations based on the player's base
+// Vegas odds. They are NOT live feeds from actual sportsbook APIs. Displayed as "Estimated"
+// to provide directional comparison value without misleading users.
 export function compareMultiSportsbookOdds(player: Player): MultiSportsbookLine[] {
   const baseTotal = player.vegas.overUnder;
   const baseSpread = player.vegas.gameSpread;

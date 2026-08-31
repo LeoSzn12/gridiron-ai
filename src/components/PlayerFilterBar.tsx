@@ -7,7 +7,7 @@ import {
   Filter
 } from 'lucide-react';
 
-export type PlayerCategoryFilter = 'ALL' | 'SMASH' | 'SIT' | 'INJURED' | 'DOME' | 'WAIVER';
+export type PlayerCategoryFilter = 'ALL' | 'MY_ROSTER' | 'SMASH' | 'SIT' | 'INJURED' | 'DOME' | 'WAIVER';
 
 export type PlayerSortOption = 
   | 'ALPHA' 
@@ -117,6 +117,7 @@ export const PlayerFilterBar: React.FC<PlayerFilterBarProps> = ({
               className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
             >
               <option value="ALL" className="bg-slate-900 text-white">All Statuses</option>
+              <option value="MY_ROSTER" className="bg-slate-900 text-emerald-300 font-bold">⭐ My Roster Only</option>
               <option value="SMASH" className="bg-slate-900 text-amber-300">🔥 Smash Starts (85+ Alpha)</option>
               <option value="SIT" className="bg-slate-900 text-rose-300">⚠️ Volatile Sits</option>
               <option value="INJURED" className="bg-slate-900 text-rose-400">🏥 Injured / Questionable</option>

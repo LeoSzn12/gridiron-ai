@@ -18,7 +18,8 @@ import {
   Radio, 
   Sliders, 
   ArrowRight,
-  User
+  User,
+  Target
 } from 'lucide-react';
 import { searchPlayers } from '../utils/searchUtils';
 
@@ -49,6 +50,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   // Quick navigation tools
   const tools = [
+    { id: 'hq', label: 'Sunday Morning HQ (Gameday Command Center)', icon: Sparkles, category: 'My Team' },
     { id: 'war-room', label: 'Decision War Room (5-Factor AI)', icon: BrainCircuit, category: 'AI Tools' },
     { id: 'draft-room', label: 'AI Draft Room (3-QB VORP)', icon: Trophy, category: 'AI Tools' },
     { id: 'start-sit', label: 'Start / Sit AI Studio', icon: Zap, category: 'AI Tools' },
@@ -58,6 +60,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     { id: 'weather', label: 'Stadium Doppler Weather Radar', icon: CloudSun, category: 'Weather' },
     { id: 'audio', label: 'AI Audio Morning Briefing Show', icon: Mic, category: 'Audio' },
     { id: 'ai-coach', label: 'AI Coach Copilot 24/7', icon: Bot, category: 'AI Tools' },
+    { id: 'props-lab', label: 'PrizePicks & Underdog Props Edge Detector', icon: Target, category: 'DFS Props' },
     { id: 'vegas-hub', label: 'Vegas Betting Odds & Line Arbitrage', icon: DollarSign, category: 'Vegas' },
     { id: 'waivers', label: 'Waiver Wire & FAAB Optimization', icon: TrendingUp, category: 'Roster' },
     { id: 'trades', label: 'Multi-Player Trade Analyzer', icon: ArrowLeftRight, category: 'Roster' },
