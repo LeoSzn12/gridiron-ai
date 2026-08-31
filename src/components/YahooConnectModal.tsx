@@ -5,6 +5,7 @@ import {
   getYahooAuthConfig, 
   saveYahooAuthConfig, 
   getYahooAuthorizationUrl, 
+  exchangeYahooAuthCode,
   fetchYahooUserLeagues,
   type YahooAuthConfig
 } from '../services/yahooFantasyService';
@@ -44,7 +45,12 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
   onImportOpponentRoster,
   onImportWaiverTargets,
 }) => {
-  const [activeTab, setActiveTab] = useState<'paste' | 'oauth'>('paste');
+  const [activeTab, setActiveTab] = useState<'paste' | 'oauth'>(() => {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('code')) {
+      return 'oauth';
+    }
+    return 'paste';
+  });
   
   // Fast Paste State
   const [pastedText, setPastedText] = useState<string>('');
@@ -55,6 +61,46 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [oauthStatusMessage, setOauthStatusMessage] = useState<string | null>(null);
   const [userLeagues, setUserLeagues] = useState<any[]>([]);
+
+  // Auto-detect OAuth authorization code in URL on redirect
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (!code || !authConfig.clientId || !authConfig.clientSecret) return;
+
+    const timer = setTimeout(() => {
+      setIsAuthenticating(true);
+      setOauthStatusMessage('Detected Yahoo Authorization code! Exchanging for access token...');
+      const redirectUri = window.location.origin;
+      exchangeYahooAuthCode(code, authConfig.clientId, authConfig.clientSecret, redirectUri)
+        .then(async (tokens) => {
+          const updatedConfig: YahooAuthConfig = {
+            ...authConfig,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            tokenExpiresAt: Date.now() + (tokens.expiresIn * 1000),
+            isConnected: true,
+          };
+          setAuthConfig(updatedConfig);
+          saveYahooAuthConfig(updatedConfig);
+          setOauthStatusMessage('Successfully authenticated with Yahoo! Fetching your active NFL leagues...');
+          
+          window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+          
+          const leagues = await fetchYahooUserLeagues(tokens.accessToken);
+          setUserLeagues(leagues);
+        })
+        .catch((err) => {
+          setOauthStatusMessage(`OAuth token notice: ${err.message}`);
+        })
+        .finally(() => {
+          setIsAuthenticating(false);
+        });
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [authConfig]);
 
   // Parse pasted text in real time
   const parsedResult = useMemo(() => {
