@@ -193,11 +193,11 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
       setOauthStatusMessage('Please enter your Yahoo Client ID first.');
       return;
     }
-    const redirectUri = window.location.origin;
+    const redirectUri = authConfig.redirectUri?.trim() || `${window.location.origin}/`;
     const authUrl = getYahooAuthorizationUrl(authConfig.clientId, redirectUri);
     window.open(authUrl, '_blank', 'width=600,height=750');
     setIsAuthenticating(true);
-    setOauthStatusMessage('Yahoo authorization window opened. Complete login and grant permissions.');
+    setOauthStatusMessage(`Opening Yahoo login with Redirect URI: ${redirectUri}`);
   };
 
   const handleFetchLeagues = async () => {
@@ -499,6 +499,22 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
                     onChange={(e) => setAuthConfig(prev => ({ ...prev, clientSecret: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
                   />
+                </div>
+
+                <div>
+                  <label className="text-xs font-mono text-slate-400 font-bold uppercase block mb-1">
+                    Redirect URI (Must match Yahoo Developer Portal character-for-character):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://localhost:5173/"
+                    value={authConfig.redirectUri || 'https://localhost:5173/'}
+                    onChange={(e) => setAuthConfig(prev => ({ ...prev, redirectUri: e.target.value }))}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                    Ensure this matches the Redirect URI you set in the Yahoo Developer App (e.g. <code className="text-purple-300">https://localhost:5173/</code>).
+                  </p>
                 </div>
               </div>
 

@@ -6,6 +6,7 @@ const YAHOO_BASE_API = 'https://fantasysports.yahooapis.com/fantasy/v2';
 export interface YahooAuthConfig {
   clientId: string;
   clientSecret: string;
+  redirectUri?: string;
   accessToken?: string;
   refreshToken?: string;
   tokenExpiresAt?: number;
@@ -27,6 +28,7 @@ export function getYahooAuthConfig(): YahooAuthConfig {
   return {
     clientId: '',
     clientSecret: '',
+    redirectUri: 'https://localhost:5173/',
     isConnected: false,
   };
 }
@@ -45,12 +47,17 @@ export function saveYahooAuthConfig(config: YahooAuthConfig): void {
 /**
  * Generate Yahoo OAuth Authorization URL
  */
-export function getYahooAuthorizationUrl(clientId: string, redirectUri: string): string {
+export function getYahooAuthorizationUrl(clientId: string, redirectUri: string, scope?: string): string {
   const cleanClientId = clientId.trim();
   const cleanRedirectUri = redirectUri.trim();
-  return `https://api.login.yahoo.com/oauth2/request_auth?client_id=${encodeURIComponent(
+  let url = `https://api.login.yahoo.com/oauth2/request_auth?client_id=${encodeURIComponent(
     cleanClientId
-  )}&redirect_uri=${encodeURIComponent(cleanRedirectUri)}&response_type=code&scope=fspt-r`;
+  )}&redirect_uri=${encodeURIComponent(cleanRedirectUri)}&response_type=code`;
+  
+  if (scope && scope.trim()) {
+    url += `&scope=${encodeURIComponent(scope.trim())}`;
+  }
+  return url;
 }
 
 /**
