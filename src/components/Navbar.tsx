@@ -93,10 +93,14 @@ interface NavbarProps {
   liveGames?: LiveNFLGameScore[];
   onOpenLeagueSettings: () => void;
   onOpenLiveDataHub: () => void;
+  onOpenYahooConnect?: () => void;
   onOpenCommandPalette?: () => void;
   onOpenOptimizer?: () => void;
   searchQuery: string;
   setSearchQuery?: (query: string) => void;
+  allProfiles?: import('../types').LeagueProfile[];
+  activeProfile?: import('../types').LeagueProfile;
+  onSelectProfile?: (profileId: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -106,11 +110,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   liveGames = [],
   onOpenLeagueSettings,
   onOpenLiveDataHub,
+  onOpenYahooConnect,
   onOpenCommandPalette,
   onOpenOptimizer,
   searchQuery,
+  allProfiles = [],
+  activeProfile,
+  onSelectProfile,
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
 
   // Flattened tools list for easy lookup
   const allTools = NAVIGATION_CATEGORIES.flatMap(cat => cat.tools);
@@ -219,19 +228,119 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Live Feeds ({liveGames.length})</span>
               </button>
 
-              <button
-                onClick={onOpenLeagueSettings}
-                className="flex items-center gap-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/60 px-4 py-2 rounded-2xl cursor-pointer transition-all shadow-md"
-              >
-                <div className="w-2.5 h-2.5 rounded-full bg-purple-400"></div>
-                <div className="text-left">
-                  <div className="text-[10px] font-mono text-slate-400 uppercase leading-none font-bold">Active League:</div>
-                  <div className="text-xs font-extrabold text-purple-300 font-display flex items-center gap-1.5 mt-0.5">
-                    <span>{leagueSettings.name}</span>
-                    <Sliders className="w-3.5 h-3.5 text-slate-400" />
+              {/* Yahoo Connect Fast Button */}
+              {onOpenYahooConnect && (
+                <button
+                  onClick={onOpenYahooConnect}
+                  className="hidden xl:flex items-center gap-1.5 bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/50 text-purple-300 px-3 py-2 rounded-2xl cursor-pointer transition-all shadow-md text-xs font-mono font-bold"
+                  title="Import or connect your Yahoo Fantasy team"
+                >
+                  <span className="text-purple-400 font-display font-black">Y!</span>
+                  <span>Yahoo Sync</span>
+                </button>
+              )}
+
+              {/* League Profile Selector Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+                  className="flex items-center gap-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/60 px-3.5 py-2 rounded-2xl cursor-pointer transition-all shadow-md text-left"
+                >
+                  <div className={`w-2.5 h-2.5 rounded-full ${
+                    activeProfile?.platform === 'yahoo' ? 'bg-purple-400' :
+                    activeProfile?.platform === 'sleeper' ? 'bg-cyan-400' : 'bg-emerald-400'
+                  }`}></div>
+                  <div>
+                    <div className="text-[10px] font-mono text-slate-400 uppercase leading-none font-bold flex items-center gap-1">
+                      <span>League Profile:</span>
+                      <span className="text-purple-400 font-mono text-[9px] uppercase">
+                        [{activeProfile?.platform || 'Custom'}]
+                      </span>
+                    </div>
+                    <div className="text-xs font-extrabold text-white font-display flex items-center gap-1.5 mt-0.5">
+                      <span className="max-w-[140px] truncate">{activeProfile?.name || leagueSettings.name}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isProfileDropdownOpen ? 'rotate-180' : ''}`} />
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+
+                {/* Profile Switcher Dropdown Menu */}
+                {isProfileDropdownOpen && (
+                  <div 
+                    className="absolute right-0 top-12 z-50 w-72 rounded-2xl bg-slate-950 border border-purple-500/30 shadow-2xl p-2.5 space-y-1 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase text-slate-400 border-b border-slate-800 flex items-center justify-between">
+                      <span>Switch Active League</span>
+                      <span className="text-purple-400">{allProfiles.length} Saved</span>
+                    </div>
+
+                    <div className="space-y-1 max-h-56 overflow-y-auto pt-1">
+                      {allProfiles.map((prof) => {
+                        const isCurrent = (activeProfile?.id || '') === prof.id;
+                        return (
+                          <button
+                            key={prof.id}
+                            onClick={() => {
+                              if (onSelectProfile) onSelectProfile(prof.id);
+                              setIsProfileDropdownOpen(false);
+                            }}
+                            className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between transition-all cursor-pointer ${
+                              isCurrent
+                                ? 'bg-purple-500/20 border border-purple-500/40 text-white'
+                                : 'hover:bg-slate-900 border border-transparent text-slate-300'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                                <span className={`text-[10px] font-mono px-1 rounded ${
+                                  prof.platform === 'yahoo' ? 'bg-purple-900/60 text-purple-300' :
+                                  prof.platform === 'sleeper' ? 'bg-cyan-900/60 text-cyan-300' : 'bg-emerald-900/60 text-emerald-300'
+                                }`}>
+                                  {prof.platform.toUpperCase()}
+                                </span>
+                                <span className="truncate">{prof.name}</span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                                {prof.settings.numTeams} Teams • {prof.userTeamName}
+                              </div>
+                            </div>
+                            {isCurrent && (
+                              <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 ml-2"></div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 space-y-1">
+                      {onOpenYahooConnect && (
+                        <button
+                          onClick={() => {
+                            onOpenYahooConnect();
+                            setIsProfileDropdownOpen(false);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-lg text-left text-xs font-bold text-purple-300 hover:bg-purple-950/40 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <span className="text-purple-400 font-display font-black text-xs">Y!</span>
+                          <span>Import / Sync Yahoo Team</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          onOpenLeagueSettings();
+                          setIsProfileDropdownOpen(false);
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg text-left text-xs font-bold text-slate-300 hover:bg-slate-900 flex items-center gap-2 transition-colors cursor-pointer"
+                      >
+                        <Sliders className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Customize Scoring Rules & Roster Slots</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

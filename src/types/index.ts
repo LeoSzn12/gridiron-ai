@@ -486,7 +486,64 @@ export interface OptimalLineupResult {
   }>;
 }
 
-// Sunday Morning Action Center Models
+// Multi-League Profile Model
+export type FantasyPlatform = 'yahoo' | 'sleeper' | 'espn' | 'custom';
+
+export interface LeagueProfile {
+  id: string;
+  name: string;
+  platform: FantasyPlatform;
+  settings: LeagueSettings;
+  myRosterIds: string[];
+  opponentRosterIds: string[];
+  userTeamName: string;
+  opponentTeamName: string;
+  externalLeagueId?: string;
+  externalTeamId?: string;
+  lastSyncedAt?: string;
+}
+
+// Yahoo Fantasy Integration Models
+export interface YahooUserLeague {
+  league_key: string;
+  league_id: string;
+  name: string;
+  num_teams: number;
+  scoring_type: string;
+  season: string;
+  url?: string;
+  user_team?: {
+    team_key: string;
+    team_id: string;
+    name: string;
+    team_logos?: Array<{ size: string; url: string }>;
+  };
+}
+
+export interface YahooRosterPlayer {
+  player_key: string;
+  player_id: string;
+  name: {
+    full: string;
+    first: string;
+    last: string;
+  };
+  editorial_team_abbr: string;
+  display_position: string;
+  selected_position?: {
+    position: string;
+  };
+  status?: string;
+  status_details?: string;
+}
+
+export interface YahooFastImportResult {
+  matchedPlayers: Player[];
+  unmatchedNames: string[];
+  totalParsed: number;
+  sourceText: string;
+}
+
 export interface ActionCenterAlert {
   id: string;
   type: 'INJURY' | 'WEATHER' | 'TRENDING_WAIVER' | 'OPTIMAL_SWAP' | 'STREAMER';
@@ -498,5 +555,7 @@ export interface ActionCenterAlert {
   replacementPlayer?: Player;
   timestamp: string;
 }
+
+
 
 

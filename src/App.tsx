@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import type { Player, LeagueSettings } from './types';
-import { PLAYERS_DATABASE, LEO_SZN_YAHOO_PRESET } from './data/mockData';
+import type { Player, LeagueSettings, LeagueProfile } from './types';
+import { PLAYERS_DATABASE } from './data/mockData';
 import { 
   syncLivePlayerData, 
   fetchLiveESPNScoreboard, 
@@ -16,14 +16,17 @@ import {
   enrichPlayersWithWeeklyProjections 
 } from './services/projectionService';
 import { 
-  getSavedMyRosterIds, 
   saveMyRosterIds, 
-  getSavedOpponentRosterIds, 
   saveOpponentRosterIds, 
-  getSavedRosterMetadata, 
   saveRosterMetadata,
   type RosterMetadata
 } from './services/rosterService';
+import { 
+  getAllLeagueProfiles, 
+  getActiveLeagueProfile, 
+  setActiveLeagueProfileId, 
+  updateLeagueProfile 
+} from './services/leagueProfileService';
 import { Navbar } from './components/Navbar';
 import { WeeklyDashboard } from './components/WeeklyDashboard';
 import { ActionCenterCard } from './components/ActionCenterCard';
@@ -47,6 +50,7 @@ import { LiveDataHubModal } from './components/LiveDataHubModal';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { FloatingComparisonDock } from './components/FloatingComparisonDock';
 import { PropsIntelligenceLab } from './components/PropsIntelligenceLab';
+import { YahooConnectModal } from './components/YahooConnectModal';
 import { 
   Flame, 
   Wind, 
@@ -59,7 +63,6 @@ import {
   LayoutGrid
 } from 'lucide-react';
 
-const SETTINGS_STORAGE_KEY = 'gridiron_league_settings_v1';
 const PINNED_STORAGE_KEY = 'gridiron_pinned_players_v1';
 
 export function App() {
@@ -92,19 +95,25 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
   
-  // Persisted League Settings
-  const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(() => {
-    try {
-      const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return LEO_SZN_YAHOO_PRESET;
+  // Multi-League Profiles State
+  const [allProfiles, setAllProfiles] = useState<LeagueProfile[]>(getAllLeagueProfiles);
+  const [activeProfile, setActiveProfile] = useState<LeagueProfile>(getActiveLeagueProfile);
+
+  // Active League Settings & Rosters derived from Active Profile
+  const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(activeProfile.settings);
+  const [myRosterIds, setMyRosterIds] = useState<string[]>(activeProfile.myRosterIds);
+  const [opponentRosterIds, setOpponentRosterIds] = useState<string[]>(activeProfile.opponentRosterIds);
+  const [rosterMeta, setRosterMeta] = useState<RosterMetadata>({
+    userTeamName: activeProfile.userTeamName,
+    opponentTeamName: activeProfile.opponentTeamName,
+    leagueId: activeProfile.id,
+    season: '2024',
+    week: 1,
   });
 
   const [isLeagueSettingsOpen, setIsLeagueSettingsOpen] = useState<boolean>(false);
   const [isLiveDataHubOpen, setIsLiveDataHubOpen] = useState<boolean>(false);
+  const [isYahooConnectOpen, setIsYahooConnectOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isLineupOptimizerOpen, setIsLineupOptimizerOpen] = useState<boolean>(false);
 
@@ -119,24 +128,46 @@ export function App() {
     return [];
   });
 
-  // User & Opponent Rosters State
-  const [myRosterIds, setMyRosterIds] = useState<string[]>(getSavedMyRosterIds);
-  const [opponentRosterIds, setOpponentRosterIds] = useState<string[]>(getSavedOpponentRosterIds);
-  const [rosterMeta, setRosterMeta] = useState<RosterMetadata>(getSavedRosterMetadata);
-
   const [playersList, setPlayersList] = useState<Player[]>(PLAYERS_DATABASE);
   const [liveScores, setLiveScores] = useState<LiveNFLGameScore[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<Player | null>(null);
 
-  // Save settings & pinned players on change
+  // Persist current settings & rosters to active profile in storage
   useEffect(() => {
-    try {
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(leagueSettings));
-    } catch {
-      // ignore
-    }
-  }, [leagueSettings]);
+    const updated: LeagueProfile = {
+      ...activeProfile,
+      settings: leagueSettings,
+      myRosterIds,
+      opponentRosterIds,
+      userTeamName: rosterMeta.userTeamName,
+      opponentTeamName: rosterMeta.opponentTeamName,
+      lastSyncedAt: new Date().toISOString(),
+    };
+    updateLeagueProfile(updated);
+    saveMyRosterIds(myRosterIds);
+    saveOpponentRosterIds(opponentRosterIds);
+    saveRosterMetadata(rosterMeta);
+  }, [leagueSettings, myRosterIds, opponentRosterIds, rosterMeta, activeProfile]);
+
+  // Handle switching active league profile
+  const handleSelectProfile = (profileId: string) => {
+    const profiles = getAllLeagueProfiles();
+    setAllProfiles(profiles);
+    const found = profiles.find(p => p.id === profileId);
+    if (!found) return;
+    setActiveLeagueProfileId(profileId);
+    setActiveProfile(found);
+    setLeagueSettings(found.settings);
+    setMyRosterIds(found.myRosterIds);
+    setOpponentRosterIds(found.opponentRosterIds);
+    setRosterMeta(prev => ({
+      ...prev,
+      userTeamName: found.userTeamName,
+      opponentTeamName: found.opponentTeamName,
+      leagueId: found.id,
+    }));
+  };
 
   useEffect(() => {
     try {
@@ -145,18 +176,6 @@ export function App() {
       // ignore
     }
   }, [pinnedPlayers]);
-
-  useEffect(() => {
-    saveMyRosterIds(myRosterIds);
-  }, [myRosterIds]);
-
-  useEffect(() => {
-    saveOpponentRosterIds(opponentRosterIds);
-  }, [opponentRosterIds]);
-
-  useEffect(() => {
-    saveRosterMetadata(rosterMeta);
-  }, [rosterMeta]);
 
   // Global ⌘K Keyboard Shortcut Listener
   useEffect(() => {
@@ -234,7 +253,6 @@ export function App() {
     const idSet = new Set(myRosterIds);
     const roster = playersList.filter(p => idSet.has(p.id));
     if (roster.length > 0) return roster;
-    // Fallback to first 12 players if empty
     return playersList.slice(0, 12);
   }, [playersList, myRosterIds]);
 
@@ -335,6 +353,35 @@ export function App() {
     }));
   };
 
+  // Yahoo Fast Import Callbacks
+  const handleImportYahooMyRoster = (playerIds: string[], teamName?: string) => {
+    setMyRosterIds(playerIds);
+    if (teamName) {
+      setRosterMeta(prev => ({ ...prev, userTeamName: teamName }));
+    }
+  };
+
+  const handleImportYahooOpponentRoster = (playerIds: string[], teamName?: string) => {
+    setOpponentRosterIds(playerIds);
+    if (teamName) {
+      setRosterMeta(prev => ({ ...prev, opponentTeamName: teamName }));
+    }
+  };
+
+  const handleImportYahooWaivers = (playerIds: string[]) => {
+    const waiverSet = new Set(playerIds);
+    setPlayersList(prev => prev.map(p => {
+      if (waiverSet.has(p.id)) {
+        return {
+          ...p,
+          isWaiverTarget: true,
+          faabRecommendedPct: Math.max(p.faabRecommendedPct, 15),
+        };
+      }
+      return p;
+    }));
+  };
+
   // Filter players by search query if any
   const filteredPlayers = useMemo(() => {
     if (!searchQuery.trim()) return playersList;
@@ -358,10 +405,14 @@ export function App() {
         liveGames={liveScores}
         onOpenLeagueSettings={() => setIsLeagueSettingsOpen(true)}
         onOpenLiveDataHub={() => setIsLiveDataHubOpen(true)}
+        onOpenYahooConnect={() => setIsYahooConnectOpen(true)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onOpenOptimizer={() => setIsLineupOptimizerOpen(true)}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+        allProfiles={allProfiles}
+        activeProfile={activeProfile}
+        onSelectProfile={handleSelectProfile}
       />
 
       {/* Main Content Area */}
@@ -619,6 +670,17 @@ export function App() {
         onUpdateRosterIds={handleUpdateRosters}
       />
 
+      {/* Yahoo Fantasy Connect & Fast-Paste Importer Modal */}
+      <YahooConnectModal
+        isOpen={isYahooConnectOpen}
+        onClose={() => setIsYahooConnectOpen(false)}
+        allPlayers={playersList}
+        settings={leagueSettings}
+        onImportMyRoster={handleImportYahooMyRoster}
+        onImportOpponentRoster={handleImportYahooOpponentRoster}
+        onImportWaiverTargets={handleImportYahooWaivers}
+      />
+
       {/* Mobile Sticky Bottom Navigation Bar */}
       <nav className="block md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#060913]/95 border-t border-slate-800/90 backdrop-blur-xl px-2 py-2 shadow-2xl">
         <div className="grid grid-cols-5 gap-1 text-center">
@@ -682,7 +744,9 @@ export function App() {
           </div>
 
           <div className="flex items-center gap-4 text-[11px] font-mono text-slate-500">
-            <span>Active Team: <strong className="text-emerald-400">{rosterMeta.userTeamName}</strong> ({leagueSettings.name})</span>
+            <span>Active League: <strong className="text-purple-400">{activeProfile.name}</strong></span>
+            <span>•</span>
+            <span>Active Team: <strong className="text-emerald-400">{rosterMeta.userTeamName}</strong></span>
             <span>•</span>
             <span className={`${liveScores.length > 0 ? 'text-emerald-400' : 'text-amber-400'} flex items-center gap-1`}>
               <span className={`w-1.5 h-1.5 rounded-full ${liveScores.length > 0 ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
