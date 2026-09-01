@@ -145,12 +145,16 @@ export function calculateProjection(
 
   const startConfidence = Math.min(99, Math.max(10, compositeScore));
 
-  // VORP Baseline Calculation (Position adjusted for 3-QB / 5-WR league)
-  const replacementBaseline = player.position === 'QB' ? (settings.roster.qb >= 3 ? 9.2 : 14.5) :
-                              player.position === 'RB' ? (settings.roster.rb >= 3 ? 6.8 : 9.0) :
-                              player.position === 'WR' ? (settings.roster.wr >= 5 ? 5.5 : 8.5) :
-                              player.position === 'TE' ? (settings.roster.te >= 2 ? 4.0 : 6.0) :
-                              player.position === 'DL' || player.position === 'LB' || player.position === 'DB' ? 5.0 : 4.0;
+  // VORP Baseline — position-adjusted, league-format aware
+  // Higher baseline = harder to generate VORP = drafted later (correct behavior for DEF/K)
+  const replacementBaseline = 
+    player.position === 'QB' ? (settings.roster.qb >= 3 ? 12.0 : 18.0) :  // 3-QB league: QBs are scarce, high baseline
+    player.position === 'RB' ? (settings.roster.rb >= 3 ? 8.5 : 11.0) :
+    player.position === 'WR' ? (settings.roster.wr >= 5 ? 7.0 : 9.5) :
+    player.position === 'TE' ? (settings.roster.te >= 2 ? 5.5 : 7.5) :
+    player.position === 'DEF' ? 8.0 :    // Waiver DEF averages ~8 pts — DEF drafted last
+    player.position === 'K'   ? 7.0 :    // Waiver K averages ~7 pts — drafted very late
+    player.position === 'DL' || player.position === 'LB' || player.position === 'DB' ? 4.0 : 3.5;
   
   const vorpValue = Number((projectedPoints - replacementBaseline).toFixed(1));
 

@@ -293,7 +293,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                       rel="noreferrer"
                       className="text-[11px] text-green-400 hover:text-green-300 flex items-center gap-1 font-mono hover:underline"
                     >
-                      <span>NVIDIA Portal</span>
+                      <span>Get nvapi key →</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -304,6 +304,42 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                     placeholder="nvapi-..."
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-green-500"
                   />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const key = configApiKey.trim();
+                        if (!key) { setTestStatus('⚠️ Enter your nvapi-... key first.'); return; }
+                        setTestStatus('🔄 Testing NVIDIA NIM connection...');
+                        try {
+                          const res = await fetch('/api/ai-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              prompt: 'Reply with exactly: NVIDIA_OK',
+                              provider: 'nvidia-nim',
+                              model: configModel || 'nvidia/llama-3.1-nemotron-70b-instruct',
+                              apiKey: key,
+                              maxTokens: 16,
+                              temperature: 0,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.error) {
+                            setTestStatus(`❌ ${data.error}`);
+                          } else {
+                            setTestStatus(`✅ NVIDIA NIM connected! Model: ${configModel?.split('/').pop()}`);
+                          }
+                        } catch (err: any) {
+                          setTestStatus(`❌ Connection failed: ${err.message}`);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-green-900/50 hover:bg-green-800/60 border border-green-500/40 text-green-300 text-[11px] font-bold font-mono cursor-pointer transition-all"
+                    >
+                      Test Connection
+                    </button>
+                    <p className="text-[10px] text-slate-500 font-mono">Verifies your key works before saving.</p>
+                  </div>
                 </div>
               )}
 
@@ -391,7 +427,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                 {aiConfig.provider === 'openrouter' ? `🌐 ${aiConfig.modelName?.split('/').pop() || 'OpenRouter'}` :
                  aiConfig.provider === 'anthropic' ? '🧠 Claude 3.5 Sonnet' :
                  aiConfig.provider === 'openai' ? '⚡ ChatGPT-4o' :
-                 aiConfig.provider === 'nvidia-nim' ? '🚀 NVIDIA DeepSeek' :
+                 aiConfig.provider === 'nvidia-nim' ? `🚀 NVIDIA: ${aiConfig.modelName?.split('/').pop() || 'NIM'}` :
                  aiConfig.provider === 'gemini' ? '⚡ Gemini 2.0 Flash' :
                  aiConfig.provider === 'local-llm' ? '💻 Local LLM' : '🧠 Neural Engine'}
               </span>

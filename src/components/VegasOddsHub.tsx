@@ -1,27 +1,50 @@
 import React, { useState } from 'react';
 import type { Player, LeagueSettings, PlayerPosition } from '../types';
-import { VEGAS_GAMES_SCHEDULE } from '../data/mockData';
+import type { LiveNFLGameScore } from '../services/liveDataService';
 import { calculateProjection, oddsToProbability } from '../services/aiEngine';
 import { 
   Flame, 
   Target, 
   Search, 
-  ChevronRight
+  ChevronRight,
+  Radio,
+  Clock
 } from 'lucide-react';
 
 interface VegasOddsHubProps {
   players: Player[];
   settings: LeagueSettings;
+  liveGames?: LiveNFLGameScore[];
   onSelectPlayerDetail: (player: Player) => void;
 }
 
 export const VegasOddsHub: React.FC<VegasOddsHubProps> = ({
   players,
   settings,
+  liveGames = [],
   onSelectPlayerDetail,
 }) => {
   const [propFilter, setPropFilter] = useState<PlayerPosition | 'ALL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Compute implied totals from ESPN game odds
+  const gamesWithImplied = liveGames.map(game => {
+    const ou = game.odds?.overUnder || 46.5;
+    const spreadRaw = parseFloat(game.odds?.spread || '0') || 0;
+    const homeImplied = Number(((ou / 2) - (spreadRaw / 2)).toFixed(1));
+    const awayImplied = Number(((ou / 2) + (spreadRaw / 2)).toFixed(1));
+    return { ...game, homeImplied, awayImplied };
+  });
+
+  // Best Vegas total from live games
+  const bestGame = [...gamesWithImplied].sort((a, b) => (b.odds?.overUnder || 0) - (a.odds?.overUnder || 0))[0];
+  const topTDProp = players
+    .filter(p => p.vegas.props.anytimeTDOdds && p.vegas.props.anytimeTDOdds !== 'N/A')
+    .sort((a, b) => {
+      const oa = parseInt(a.vegas.props.anytimeTDOdds.replace('+',''), 10);
+      const ob = parseInt(b.vegas.props.anytimeTDOdds.replace('+',''), 10);
+      return (isNaN(oa) ? 999 : oa) - (isNaN(ob) ? 999 : ob);
+    })[0];
 
 
   const filteredPlayers = players
@@ -38,9 +61,11 @@ export const VegasOddsHub: React.FC<VegasOddsHubProps> = ({
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
               VEGAS INTELLIGENCE
             </span>
-            <span className="text-xs text-slate-400">Sportsbook Implied Probabilities</span>
+            <span className="text-xs text-slate-400">
+              {liveGames.length > 0 ? `${liveGames.length} live games from ESPN` : 'ESPN Sportsbook Lines'}
+            </span>
           </div>
-          <h2 className="text-2xl font-bold text-white font-display mt-1">Vegas Odds, Implied Totals & Player Props</h2>
+          <h2 className="text-2xl font-bold text-white font-display mt-1">Vegas Odds, Implied Totals &amp; Player Props</h2>
           <p className="text-xs text-slate-300 max-w-2xl mt-1">
             Vegas lines provide the sharpest baseline for game script, red zone opportunity volume, and individual player touchdown probability.
           </p>
@@ -49,62 +74,106 @@ export const VegasOddsHub: React.FC<VegasOddsHubProps> = ({
         <div className="flex items-center gap-3 bg-slate-950/80 p-3 rounded-2xl border border-slate-800 text-xs font-mono">
           <div className="text-right">
             <div className="text-slate-500 text-[10px]">HIGHEST TOTAL</div>
-            <div className="font-bold text-emerald-400">BAL vs CIN (52.5)</div>
+            <div className="font-bold text-emerald-400">
+              {bestGame
+                ? `${bestGame.awayTeam.abbreviation} @ ${bestGame.homeTeam.abbreviation} (${bestGame.odds?.overUnder ?? 'N/A'})`
+                : 'No games scheduled'}
+            </div>
           </div>
           <div className="h-8 w-px bg-slate-800"></div>
           <div>
             <div className="text-slate-500 text-[10px]">TOP TD PROP</div>
-            <div className="font-bold text-indigo-400">S. Barkley (-165)</div>
+            <div className="font-bold text-indigo-400">
+              {topTDProp
+                ? `${topTDProp.name.split(' ').pop()} (${topTDProp.vegas.props.anytimeTDOdds})`
+                : '—'}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Vegas Game Boards */}
+      {/* Vegas Game Boards — Real ESPN Data */}
       <div className="space-y-3">
         <h3 className="text-base font-bold text-white flex items-center gap-2">
           <Flame className="w-4 h-4 text-amber-400" />
-          <span>Vegas Game Spreads & Implied Totals</span>
+          <span>Vegas Game Spreads &amp; Implied Totals</span>
+          {liveGames.length > 0 && (
+            <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <Radio className="w-3 h-3" /> ESPN Live
+            </span>
+          )}
         </h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {VEGAS_GAMES_SCHEDULE.map((game) => (
-            <div
-              key={game.id}
-              className="glass-panel p-4 rounded-2xl space-y-3 hover:border-slate-700 transition-all"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-white font-display">{game.matchup}</span>
-                <span className="text-[11px] font-mono text-slate-400">{game.dayTime}</span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
-                  <div className="text-[10px] text-slate-500 font-mono">SPREAD</div>
-                  <div className="font-mono font-bold text-emerald-400 mt-0.5">{game.spread}</div>
-                </div>
-                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
-                  <div className="text-[10px] text-slate-500 font-mono">TOTAL O/U</div>
-                  <div className="font-mono font-bold text-indigo-400 mt-0.5">{game.total}</div>
-                </div>
-                <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
-                  <div className="text-[10px] text-slate-500 font-mono">IMPLIED PTS</div>
-                  <div className="font-mono font-bold text-amber-400 mt-0.5">{game.balImplied} - {game.cinImplied}</div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+        {gamesWithImplied.length === 0 ? (
+          <div className="glass-panel p-6 rounded-2xl text-center space-y-2">
+            <Clock className="w-8 h-8 text-slate-600 mx-auto" />
+            <p className="text-slate-400 text-sm font-mono">No NFL games currently scheduled.</p>
+            <p className="text-slate-500 text-xs">Live game odds and spreads will appear here on game days. Player props below are pulled from live Sleeper projections.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {gamesWithImplied.map((game) => (
+              <div
+                key={game.id}
+                className="glass-panel p-4 rounded-2xl space-y-3 hover:border-slate-700 transition-all"
+              >
                 <div className="flex items-center justify-between">
-                  <span>Pace Forecast:</span>
-                  <span className="text-slate-200 font-medium">{game.paceForecast}</span>
+                  <span className="text-sm font-bold text-white font-display">
+                    {game.awayTeam.abbreviation} @ {game.homeTeam.abbreviation}
+                  </span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border font-bold ${
+                    game.status === 'IN_PROGRESS'
+                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 animate-pulse'
+                      : game.status === 'FINAL'
+                      ? 'bg-slate-950/60 border-slate-700 text-slate-400'
+                      : 'bg-indigo-950/40 border-indigo-500/30 text-indigo-300'
+                  }`}>
+                    {game.status === 'IN_PROGRESS' ? '🔴 LIVE' : game.status === 'FINAL' ? 'FINAL' : game.gameTime}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Weather:</span>
-                  <span className="text-slate-300">{game.weatherSummary}</span>
+
+                {/* Live scores if in progress */}
+                {(game.status === 'IN_PROGRESS' || game.status === 'FINAL') && (
+                  <div className="flex items-center justify-between text-xs font-mono bg-slate-950/50 rounded-xl p-2.5 border border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <img src={game.awayTeam.logo} alt={game.awayTeam.abbreviation} className="w-6 h-6 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <span className="text-slate-200 font-bold">{game.awayTeam.abbreviation}</span>
+                      <span className="text-white font-extrabold text-sm">{game.awayTeam.score}</span>
+                    </div>
+                    <span className="text-slate-500 text-[10px]">—</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-extrabold text-sm">{game.homeTeam.score}</span>
+                      <span className="text-slate-200 font-bold">{game.homeTeam.abbreviation}</span>
+                      <img src={game.homeTeam.logo} alt={game.homeTeam.abbreviation} className="w-6 h-6 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-500 font-mono">SPREAD</div>
+                    <div className="font-mono font-bold text-emerald-400 mt-0.5">{game.odds?.spread || 'N/A'}</div>
+                  </div>
+                  <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-500 font-mono">TOTAL O/U</div>
+                    <div className="font-mono font-bold text-indigo-400 mt-0.5">{game.odds?.overUnder ?? 'N/A'}</div>
+                  </div>
+                  <div className="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+                    <div className="text-[10px] text-slate-500 font-mono">IMPLIED</div>
+                    <div className="font-mono font-bold text-amber-400 mt-0.5">{game.awayImplied} / {game.homeImplied}</div>
+                  </div>
                 </div>
+
+                {game.weather && (
+                  <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
+                    <span>Weather: </span>
+                    <span className="text-slate-300">{game.weather.temperature}°F, {game.weather.condition}</span>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Player Props Explorer Board */}

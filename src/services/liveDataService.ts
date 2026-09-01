@@ -1,5 +1,16 @@
 import type { Player, PlayerWeather } from '../types';
 import { PLAYERS_DATABASE } from '../data/mockData';
+import type { SleeperRawPlayer } from '../types';
+
+// NFL team abbreviation normalization — ESPN uses different abbrs than Sleeper in some cases
+const ESPN_TO_SLEEPER_TEAM: Record<string, string> = {
+  'JAC': 'JAX', 'WSH': 'WAS', 'LAR': 'LA', 'LAC': 'LAC',
+  'SFO': 'SF', 'GNB': 'GB', 'NWE': 'NE', 'NOR': 'NO',
+  'KAN': 'KC', 'TAM': 'TB', 'SDG': 'LAC', 'STL': 'LA',
+};
+function normalizeTeam(abbr: string): string {
+  return ESPN_TO_SLEEPER_TEAM[abbr] || abbr;
+}
 
 
 // NFL Stadium Geo Coordinates for Live Open-Meteo Weather
@@ -346,3 +357,346 @@ export async function checkLiveEndpointsTelemetry(): Promise<EndpointTelemetry[]
   return results;
 }
 
+
+/**
+ * 6. Enrich player list with real ESPN game odds (spread, O/U, implied totals)
+ * Matches players to their game by team abbreviation and overlays real sportsbook lines.
+ */
+export async function enrichPlayersWithESPNOdds(players: Player[]): Promise<Player[]> {
+  try {
+    const games = await fetchLiveESPNScoreboard();
+    if (!games || games.length === 0) return players;
+
+    // Build a map: team abbr → game odds
+    const teamOddsMap = new Map<string, {
+      spread: number;
+      overUnder: number;
+      impliedHome: number;
+      impliedAway: number;
+      homeTeam: string;
+      awayTeam: string;
+      gameTime: string;
+      status: string;
+    }>();
+
+    games.forEach(game => {
+      const ou = game.odds?.overUnder || 46.5;
+      // Spread: positive = home is underdog, negative = home is favorite
+      const spreadRaw = parseFloat(game.odds?.spread || '0') || 0;
+      // Implied totals using standard vig model
+      const homeImplied = Number(((ou / 2) - (spreadRaw / 2)).toFixed(1));
+      const awayImplied = Number(((ou / 2) + (spreadRaw / 2)).toFixed(1));
+
+      const entry = {
+        spread: spreadRaw,
+        overUnder: ou,
+        impliedHome: homeImplied,
+        impliedAway: awayImplied,
+        homeTeam: normalizeTeam(game.homeTeam.abbreviation),
+        awayTeam: normalizeTeam(game.awayTeam.abbreviation),
+        gameTime: game.gameTime,
+        status: game.status,
+      };
+
+      teamOddsMap.set(normalizeTeam(game.homeTeam.abbreviation), entry);
+      teamOddsMap.set(normalizeTeam(game.awayTeam.abbreviation), entry);
+    });
+
+    return players.map(player => {
+      const gameData = teamOddsMap.get(player.team) || teamOddsMap.get(player.team.toUpperCase());
+      if (!gameData) return player;
+
+      const isHome = gameData.homeTeam === player.team || gameData.homeTeam === player.team.toUpperCase();
+      const myImplied = isHome ? gameData.impliedHome : gameData.impliedAway;
+      const oppImplied = isHome ? gameData.impliedAway : gameData.impliedHome;
+      const oppTeam = isHome ? gameData.awayTeam : gameData.homeTeam;
+
+      // Determine game script trend from implied totals
+      let gameScriptTrend: Player['vegas']['gameScriptTrend'] = 'High-Scoring Shootout';
+      if (gameData.overUnder < 43) gameScriptTrend = 'Defensive Grind';
+      else if (myImplied < oppImplied - 6) gameScriptTrend = 'Trailing Negative Script';
+      else if (myImplied > oppImplied + 6) gameScriptTrend = 'Blowout Alert (Favorable Script)';
+      else if (gameData.overUnder > 48) gameScriptTrend = 'High-Scoring Shootout';
+
+      return {
+        ...player,
+        opponent: oppTeam,
+        isHome,
+        gameTime: gameData.gameTime,
+        vegas: {
+          ...player.vegas,
+          gameSpread: isHome ? gameData.spread : -gameData.spread,
+          overUnder: gameData.overUnder,
+          impliedTeamTotal: myImplied,
+          opponentImpliedTotal: oppImplied,
+          gameScriptTrend,
+        },
+      };
+    });
+  } catch (err) {
+    console.warn('ESPN odds enrichment failed, keeping existing data:', err);
+    return players;
+  }
+}
+
+
+/**
+ * 7. Build a complete live player database from Sleeper API.
+ * Merges Sleeper's 3,000+ player records (real names, teams, injuries, CDN photos)
+ * with weekly projections and the existing curated static pool as a fallback.
+ * Returns all fantasy-relevant NFL players with live data.
+ */
+export async function buildLivePlayersDatabase(
+  existingPool: Player[],
+  season: string = '2025',
+  week: number = 1
+): Promise<Player[]> {
+  try {
+    const SLEEPER_BASE = 'https://api.sleeper.app/v1';
+
+    // Fetch Sleeper player directory (cached 12h in localStorage)
+    const CACHE_KEY = 'gridiron_sleeper_players_cache_v1';
+    const CACHE_TTL = 1000 * 60 * 60 * 12;
+    let sleeperPlayers: Record<string, SleeperRawPlayer> = {};
+
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.timestamp && Date.now() - parsed.timestamp < CACHE_TTL && parsed.data) {
+          sleeperPlayers = parsed.data;
+        }
+      }
+    } catch { /* ignore */ }
+
+    if (Object.keys(sleeperPlayers).length === 0) {
+      const res = await fetch(`${SLEEPER_BASE}/players/nfl`);
+      if (res.ok) {
+        sleeperPlayers = await res.json();
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: sleeperPlayers }));
+        } catch { /* quota */ }
+      }
+    }
+
+    // Fetch live weekly projections (cached 4h)
+    let projectionsMap: Record<string, Record<string, number>> = {};
+    const PROJ_CACHE_KEY = `gridiron_projections_cache_${season}_week_${week}`;
+    const PROJ_TTL = 1000 * 60 * 60 * 4;
+    try {
+      const cached = localStorage.getItem(PROJ_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.timestamp && Date.now() - parsed.timestamp < PROJ_TTL && parsed.data) {
+          projectionsMap = parsed.data;
+        }
+      }
+    } catch { /* ignore */ }
+
+    if (Object.keys(projectionsMap).length === 0) {
+      try {
+        const res = await fetch(`${SLEEPER_BASE}/projections/nfl/${season}/${week}?season_type=regular`);
+        if (res.ok) {
+          const raw = await res.json();
+          if (Array.isArray(raw)) {
+            raw.forEach((item: any) => {
+              if (item.player_id && item.stats) projectionsMap[item.player_id] = item.stats;
+            });
+          } else if (raw && typeof raw === 'object') {
+            Object.entries(raw).forEach(([pid, val]: [string, any]) => {
+              projectionsMap[pid] = val.stats || val;
+            });
+          }
+          try {
+            localStorage.setItem(PROJ_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: projectionsMap }));
+          } catch { /* quota */ }
+        }
+      } catch (err) {
+        console.warn('Sleeper projections fetch failed:', err);
+      }
+    }
+
+    // Fantasy-relevant positions
+    const FANTASY_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB']);
+
+    // Build index of existing static pool by id and name for merging
+    const existingById = new Map<string, Player>();
+    const existingByName = new Map<string, Player>();
+    existingPool.forEach(p => {
+      existingById.set(p.id, p);
+      existingByName.set(p.name.toLowerCase().replace(/[^a-z0-9]/g, ''), p);
+    });
+
+    const DOME_TEAMS = new Set(['DAL', 'DET', 'IND', 'LV', 'LA', 'LAR', 'LAC', 'MIN', 'NO', 'ARI', 'ATL', 'HOU']);
+
+    function mapPos(pos: string): Player['position'] {
+      const p = pos.toUpperCase();
+      if (['QB','RB','WR','TE','K','DEF'].includes(p)) return p as Player['position'];
+      if (['DL','DE','DT','NT'].includes(p)) return 'DL';
+      if (['LB','ILB','OLB','MLB'].includes(p)) return 'LB';
+      if (['DB','CB','S','FS','SS'].includes(p)) return 'DB';
+      return 'WR';
+    }
+
+    function mapInjury(status?: string | null): Player['injuryStatus'] {
+      if (!status) return 'HEALTHY';
+      const s = status.toUpperCase();
+      if (s === 'Q' || s === 'QUESTIONABLE') return 'QUESTIONABLE';
+      if (s === 'D' || s === 'DOUBTFUL') return 'DOUBTFUL';
+      if (s === 'O' || s === 'OUT') return 'OUT';
+      if (s === 'IR' || s === 'INJURED_RESERVE') return 'IR';
+      return 'HEALTHY';
+    }
+
+    const liveBuilt: Player[] = [];
+    const seenIds = new Set<string>();
+
+    Object.values(sleeperPlayers).forEach((raw) => {
+      if (!raw.player_id || !raw.full_name) return;
+      if (!raw.team || raw.status === 'Inactive') return;
+
+      const pos = raw.position || raw.fantasy_positions?.[0] || '';
+      if (!FANTASY_POSITIONS.has(pos.toUpperCase())) return;
+      if (seenIds.has(raw.player_id)) return;
+      seenIds.add(raw.player_id);
+
+      const team = raw.team || 'FA';
+      const posTyped = mapPos(pos);
+      const injuryStatus = mapInjury(raw.injury_status);
+
+      // Real Sleeper CDN photo
+      const avatar = `https://sleepercdn.com/content/nfl/players/thumb/${raw.player_id}.jpg`;
+
+      // Check if we have enriched static data to merge
+      const normName = raw.full_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existing = existingById.get(raw.player_id) || existingByName.get(normName);
+
+      // Live projection stats
+      const proj = projectionsMap[raw.player_id] || {};
+      const passYdLine = proj.pass_yd ? Math.round(proj.pass_yd) : undefined;
+      const passTDLine = proj.pass_td ? Number(proj.pass_td.toFixed(1)) : undefined;
+      const rushYdLine = proj.rush_yd ? Math.round(proj.rush_yd) : undefined;
+      const recYdLine = proj.rec_yd ? Math.round(proj.rec_yd) : undefined;
+      const recLine = proj.rec ? Number(proj.rec.toFixed(1)) : undefined;
+
+      const isDome = DOME_TEAMS.has(team);
+      const stadium = STADIUM_COORDINATES[team];
+
+      if (existing) {
+        // Merge: keep all rich static data but overlay live fields
+        liveBuilt.push({
+          ...existing,
+          injuryStatus,
+          injuryNote: raw.injury_notes || existing.injuryNote,
+          avatar, // real Sleeper photo
+          vegas: {
+            ...existing.vegas,
+            props: {
+              ...existing.vegas.props,
+              ...(passYdLine !== undefined && { passingYardsOU: passYdLine }),
+              ...(passTDLine !== undefined && { passingTDsOU: passTDLine }),
+              ...(rushYdLine !== undefined && { rushingYardsOU: rushYdLine }),
+              ...(recYdLine !== undefined && { receivingYardsOU: recYdLine }),
+              ...(recLine !== undefined && { receptionsOU: recLine }),
+            },
+          },
+        });
+      } else {
+        // Build a new player from Sleeper data
+        const depthOrder = raw.depth_chart_order || 99;
+        const isStarter = depthOrder <= 2;
+
+        liveBuilt.push({
+          id: raw.player_id,
+          name: raw.full_name,
+          team,
+          position: posTyped,
+          jerseyNumber: 0,
+          opponent: 'TBD',
+          isHome: true,
+          gameTime: 'TBD',
+          avatar,
+          injuryStatus,
+          injuryNote: raw.injury_notes || undefined,
+          rosterPct: depthOrder === 1 ? 92 : depthOrder === 2 ? 55 : 20,
+          faabRecommendedPct: depthOrder === 1 ? 20 : depthOrder === 2 ? 8 : 2,
+          isWaiverTarget: depthOrder >= 2 && depthOrder <= 3,
+          waiverTrend: 'RISING',
+          tradeValue: posTyped === 'QB' ? 35 : posTyped === 'RB' ? 30 : posTyped === 'WR' ? 28 : 18,
+          adp: depthOrder === 1 ? 80 : 180,
+          tier: depthOrder <= 1 ? 2 : 4,
+          stats: {
+            snapSharePct: depthOrder === 1 ? 82 : 45,
+            targetSharePct: (posTyped === 'WR' || posTyped === 'TE') ? 18 : 6,
+            carrySharePct: posTyped === 'RB' ? 58 : 0,
+            redZoneOpportunitiesPerGame: depthOrder === 1 ? 2.1 : 0.8,
+            recentAveragePoints: 0,
+            seasonTotalPoints: 0,
+          },
+          weather: {
+            temperature: isDome ? 72 : 65,
+            windSpeed: isDome ? 0 : 7,
+            windGust: isDome ? 0 : 10,
+            precipitation: 'None',
+            isDome,
+            stadiumName: stadium?.name || `${team} Stadium`,
+            turfType: 'FieldTurf',
+            riskLevel: 'LOW',
+            summary: isDome ? `Indoor dome — zero weather impact.` : `Outdoor venue at ${stadium?.name || team}.`,
+          },
+          vegas: {
+            gameSpread: -3,
+            overUnder: 46.5,
+            impliedTeamTotal: 24.5,
+            opponentImpliedTotal: 22.0,
+            gameScriptTrend: 'High-Scoring Shootout',
+            props: {
+              passingYardsOU: posTyped === 'QB' ? (passYdLine ?? 235) : undefined,
+              passingTDsOU: posTyped === 'QB' ? (passTDLine ?? 1.7) : undefined,
+              rushingYardsOU: posTyped === 'RB' ? (rushYdLine ?? 64) : posTyped === 'QB' ? (rushYdLine ?? 18) : undefined,
+              receivingYardsOU: (posTyped === 'WR' || posTyped === 'TE') ? (recYdLine ?? 55) : posTyped === 'RB' ? (recYdLine ?? 16) : undefined,
+              receptionsOU: (posTyped === 'WR' || posTyped === 'TE') ? (recLine ?? 4.5) : 2.5,
+              anytimeTDOdds: isStarter ? (posTyped === 'QB' ? '+200' : posTyped === 'RB' ? '-110' : '+130') : '+400',
+            },
+          },
+          defense: {
+            opponentTeam: 'OPP',
+            rankVsPosition: 16,
+            epaPerPlayRank: 16,
+            pressureRatePct: 28,
+            passRushWinRateRank: 16,
+            runDefenseRank: 16,
+            coverageScheme: 'Balanced',
+            slotVulnerability: 'Neutral',
+            redZoneTDAllowedPct: 52,
+            matchupGrade: 'B',
+          },
+          coaching: {
+            headCoach: 'Head Coach',
+            offensiveCoordinator: 'OC',
+            paceRank: 16,
+            secondsPerSnap: 25.5,
+            proe: 1.2,
+            neutralPassRate: 56,
+            runScheme: 'Balanced Mixed',
+            redZoneTendency: 'Balanced Mixed',
+          },
+          recentGames: [],
+          aiAnalysisSummary: `${raw.full_name} — live Sleeper data. ${injuryStatus !== 'HEALTHY' ? `⚠️ ${injuryStatus}` : 'Active.'}`,
+        });
+      }
+    });
+
+    // Enrich with real ESPN game odds
+    const withOdds = await enrichPlayersWithESPNOdds(liveBuilt);
+
+    // Apply live Open-Meteo weather for outdoor stadiums
+    const withWeather = await syncLivePlayerData(withOdds);
+
+    console.info(`[Gridiron AI] Live DB built: ${withWeather.length} players from Sleeper + ESPN odds + Open-Meteo weather.`);
+    return withWeather;
+  } catch (err) {
+    console.warn('[Gridiron AI] buildLivePlayersDatabase failed, using static pool:', err);
+    return existingPool;
+  }
+}

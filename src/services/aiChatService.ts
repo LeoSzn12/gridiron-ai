@@ -43,9 +43,12 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
     { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Balanced everyday performer' },
   ],
   'nvidia-nim': [
-    { id: 'deepseek-ai/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash (CoT)', description: 'NVIDIA GPU Accelerated Chain-of-Thought' },
-    { id: 'deepseek-ai/deepseek-r1', name: 'DeepSeek R1', description: 'High-reasoning pure logic' },
-    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', description: 'NVIDIA NIM High Throughput' },
+    { id: 'moonshotai/kimi-k3', name: 'Kimi K3 (NVIDIA)', description: '🔥 Moonshot AI — ultra-smart reasoning via NVIDIA NIM' },
+    { id: 'deepseek-ai/deepseek-r1', name: 'DeepSeek R1 (NVIDIA)', description: 'Chain-of-thought reasoning — GPU accelerated' },
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama Nemotron 70B', description: "NVIDIA's own flagship instruct model" },
+    { id: 'thudm/glm-4-9b-chat', name: 'GLM-4 9B (NVIDIA)', description: 'THUDM GLM-4 — fast and accurate via NIM' },
+    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', description: 'High-throughput instruct model on NVIDIA NIM' },
+    { id: 'mistralai/mistral-large', name: 'Mistral Large (NVIDIA)', description: 'Fast frontier model via NVIDIA NIM' },
   ],
   'local-llm': [
     { id: 'llama3:latest', name: 'Llama 3 (Local Ollama)', description: 'Runs 100% offline on your machine' },
@@ -65,7 +68,7 @@ export function getSavedAIConfig(): AIProviderConfig {
     // ignore
   }
 
-  // Check if OpenRouter key is provided via env
+  // Check if OpenRouter key is provided via env (VITE_ prefix required for frontend exposure)
   const envOpenRouterKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY || '';
   if (envOpenRouterKey) {
     return {
@@ -75,19 +78,22 @@ export function getSavedAIConfig(): AIProviderConfig {
     };
   }
 
-  // Check if NVIDIA key is provided via env
+  // Check if NVIDIA key is provided via env (VITE_ prefix required for frontend exposure)
   const envNvidiaKey = (import.meta as any).env?.VITE_NVIDIA_API_KEY || '';
   if (envNvidiaKey) {
     return {
       provider: 'nvidia-nim',
       apiKey: envNvidiaKey,
-      modelName: 'deepseek-ai/deepseek-v4-flash-0731',
+      modelName: 'moonshotai/kimi-k3',
     };
   }
 
+  // Default: use NVIDIA NIM with empty apiKey — the Netlify function reads NVIDIA_API_KEY
+  // from server-side env vars, so the chatbot works without the user needing to configure anything.
   return {
-    provider: 'openrouter',
-    modelName: 'anthropic/claude-3.5-sonnet',
+    provider: 'nvidia-nim',
+    apiKey: '',
+    modelName: 'moonshotai/kimi-k3',
   };
 }
 
@@ -401,7 +407,26 @@ export async function getAIChatResponseAsync(
       ],
     };
   } catch (err: any) {
-    console.warn('External AI call failed, falling back to built-in Neural Engine:', err);
-    return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
+    const errMsg = err?.message || 'Unknown error';
+    console.warn('External AI call failed:', errMsg);
+    
+    // Surface the real error to the user rather than silently falling back
+    const isKeyError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('api key') || errMsg.toLowerCase().includes('unauthorized');
+    const isModelError = errMsg.toLowerCase().includes('404') || errMsg.toLowerCase().includes('model') || errMsg.toLowerCase().includes('not found');
+    
+    const heuristicFallback = generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
+    
+    return {
+      ...heuristicFallback,
+      text: isKeyError
+        ? `⚠️ **NVIDIA API Key Issue** — Please update your \`NVIDIA_API_KEY\` in Netlify environment variables with your current key, then redeploy.\n\n_Error: ${errMsg}_\n\n---\n\n${heuristicFallback.text}`
+        : isModelError
+        ? `⚠️ **Model Not Found** — The model \`${config.modelName}\` may not be available on your NVIDIA subscription. Try switching to **Kimi K3** or **Nemotron 70B** in AI Settings.\n\n---\n\n${heuristicFallback.text}`
+        : `⚠️ **AI Connection Issue** — ${errMsg}\n\nCheck AI Settings → Test Connection to debug. Here's local analysis in the meantime:\n\n---\n\n${heuristicFallback.text}`,
+      dataBadges: [
+        { label: 'AI Status', value: '⚠️ Connection Failed', type: 'warning' as const },
+        { label: 'Fallback', value: 'Local Engine', type: 'neutral' as const },
+      ],
+    };
   }
 }

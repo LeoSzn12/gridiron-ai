@@ -108,11 +108,19 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
   const isUserOnTheClock = currentTeam.isUser && currentPickIndex < totalRounds * settings.numTeams;
   const isDraftFinished = currentPickIndex >= totalRounds * settings.numTeams;
 
-  // AI Recommended Pick for team on clock
+  // AI Recommended Pick for team on clock — respects position draft timing conventions
   const aiRecommendedPlayer = useMemo(() => {
     if (availablePlayers.length === 0) return null;
-    return availablePlayers[0].player;
-  }, [availablePlayers]);
+    const round = currentRound;
+    // Filter out positions that should never be drafted early:
+    // DEF/K: not before round 12; IDP: not before round 8 (unless very late in draft)
+    const earlyRoundEligible = availablePlayers.filter(({ player: p }) => {
+      if (p.position === 'DEF' || p.position === 'K') return round >= 12;
+      if (p.position === 'DL' || p.position === 'LB' || p.position === 'DB') return round >= 8;
+      return true;
+    });
+    return (earlyRoundEligible[0] || availablePlayers[0]).player;
+  }, [availablePlayers, currentRound]);
 
   // Core Draft Action
   const handleDraftPlayer = (player: Player) => {

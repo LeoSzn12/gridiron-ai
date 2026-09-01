@@ -67,8 +67,16 @@ export default async (req: Request) => {
       authHeader = `Bearer ${key.trim()}`;
     } else if (provider === 'nvidia-nim') {
       targetUrl = 'https://integrate.api.nvidia.com/v1/chat/completions';
-      const key = apiKey || process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY || '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';
-      authHeader = `Bearer ${key.trim()}`;
+      const key = (apiKey || process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY || '').trim();
+      if (!key) {
+        return new Response(JSON.stringify({
+          error: 'NVIDIA API key is required. Add your nvapi-... key in the AI Model Settings panel, or set the NVIDIA_API_KEY environment variable in your Netlify dashboard.'
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      }
+      authHeader = `Bearer ${key}`;
     } else if (provider === 'anthropic') {
       // Direct Anthropic API
       const key = apiKey || process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY || '';
@@ -110,16 +118,24 @@ export default async (req: Request) => {
     }
 
     // Standard OpenAI-compatible format (OpenRouter, OpenAI, NVIDIA NIM)
+    // Per-model extra params — only add what each model actually supports
+    const nvidiaExtras: Record<string, unknown> = {};
+    if (provider === 'nvidia-nim') {
+      const m = (model || '').toLowerCase();
+      if (m.includes('kimi') || m.includes('deepseek-r1') || m.includes('deepseek-v3')) {
+        // Kimi K3 and DeepSeek support top-level reasoning_effort
+        nvidiaExtras.reasoning_effort = 'max';
+      }
+      // Note: chat_template_kwargs with thinking:true is NOT supported on most NIM models — removed
+    }
+
     const payload = {
       model,
       messages,
       temperature,
       max_tokens: maxTokens,
-      ...(provider === 'nvidia-nim' ? {
-        chat_template_kwargs: { thinking: true, reasoning_effort: 'high' },
-        extra_body: { chat_template_kwargs: { thinking: true, reasoning_effort: 'high' } },
-      } : {}),
       stream: false,
+      ...nvidiaExtras,
     };
 
     const res = await fetch(targetUrl, {

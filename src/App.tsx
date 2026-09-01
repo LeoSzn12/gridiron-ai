@@ -2,19 +2,11 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Player, LeagueSettings, LeagueProfile } from './types';
 import { PLAYERS_DATABASE } from './data/mockData';
 import { 
-  syncLivePlayerData, 
+  buildLivePlayersDatabase,
   fetchLiveESPNScoreboard, 
   fetchSleeperNFLState,
   type LiveNFLGameScore 
 } from './services/liveDataService';
-import { 
-  fetchSleeperNFLPlayers, 
-  convertSleeperToGridironPlayer 
-} from './services/sleeperService';
-import { 
-  fetchLiveWeeklyProjections, 
-  enrichPlayersWithWeeklyProjections 
-} from './services/projectionService';
 import { 
   saveMyRosterIds, 
   saveOpponentRosterIds, 
@@ -190,63 +182,62 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Auto-sync real-time weather, live ESPN NFL scoreboard, Sleeper players, and live weekly projections on mount
+  // Track whether we're loading live data for the first time
+  const [isLiveDataLoading, setIsLiveDataLoading] = useState(true);
+
+  // Auto-sync: build the full live player database on startup
   useEffect(() => {
     let isMounted = true;
-    
-    // 1. Fetch live ESPN Scoreboard
-    fetchLiveESPNScoreboard().then(scores => {
-      if (isMounted && scores.length > 0) {
-        setLiveScores(scores);
-      }
-    }).catch(err => {
-      console.warn('Initial ESPN fetch notice:', err);
-    });
 
-    // 2. Fetch live Open-Meteo Doppler Stadium Weather
-    syncLivePlayerData(PLAYERS_DATABASE).then(livePlayers => {
-      if (isMounted) {
-        setPlayersList(livePlayers);
-      }
-    }).catch(err => {
-      console.warn('Initial live weather sync notice:', err);
-    });
+    const initLiveData = async () => {
+      setIsLiveDataLoading(true);
 
-    // 3. Hydrate Sleeper full database & weekly projections
-    Promise.all([
-      fetchSleeperNFLState(),
-      fetchSleeperNFLPlayers(),
-    ]).then(async ([nflState, sleeperData]) => {
-      if (!isMounted) return;
+      // 1. Fetch ESPN scoreboard for live scores display (fast, runs in parallel)
+      fetchLiveESPNScoreboard().then(scores => {
+        if (isMounted && scores.length > 0) setLiveScores(scores);
+      }).catch(() => {});
 
-      const season = nflState.season || '2024';
+      // 2. Get live NFL season/week from Sleeper
+      const nflState = await fetchSleeperNFLState().catch(() => ({ week: 1, season: '2025', seasonType: 'regular' }));
+      const season = nflState.season || '2025';
       const week = nflState.week || 1;
 
-      // Fetch weekly projections
-      const projectionsMap = await fetchLiveWeeklyProjections(season, week);
+      if (isMounted) {
+        setRosterMeta(prev => ({ ...prev, season, week }));
+      }
+
+      // 3. Build full live player DB: Sleeper 3000+ players + ESPN odds + Open-Meteo weather
+      const livePlayers = await buildLivePlayersDatabase(PLAYERS_DATABASE, season, week);
 
       if (isMounted) {
-        setPlayersList(prev => {
-          // Enriched top key players from Sleeper directory
-          const enriched = prev.map(p => {
-            const raw = sleeperData[p.id] || Object.values(sleeperData).find(
-              sp => sp.search_full_name === p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
-            );
-            return raw ? convertSleeperToGridironPlayer(raw, p) : p;
-          });
-
-          // Ingest weekly projection stats into custom scoring
-          return enrichPlayersWithWeeklyProjections(enriched, projectionsMap, leagueSettings);
-        });
+        setPlayersList(livePlayers);
+        setIsLiveDataLoading(false);
       }
-    }).catch(err => {
-      console.warn('Live projections sync notice:', err);
+    };
+
+    initLiveData().catch(err => {
+      console.warn('Live data init failed, using static pool:', err);
+      if (isMounted) {
+        setIsLiveDataLoading(false);
+      }
     });
+
+
+    // Refresh ESPN scoreboard every 15 minutes (lightweight)
+    const scoreRefresh = setInterval(() => {
+      if (isMounted) {
+        fetchLiveESPNScoreboard().then(scores => {
+          if (isMounted && scores.length > 0) setLiveScores(scores);
+        }).catch(() => {});
+      }
+    }, 15 * 60 * 1000);
 
     return () => {
       isMounted = false;
+      clearInterval(scoreRefresh);
     };
-  }, [leagueSettings]);
+  }, []); // runs once on mount — leagueSettings dependency removed to avoid re-fetching 3000 players on every settings change
+
 
   // Derived user roster & opponent roster
   const myRoster = useMemo(() => {
@@ -397,6 +388,14 @@ export function App() {
   return (
     <div className="min-h-screen bg-[#060913] text-slate-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-300 relative pb-16 md:pb-0">
       
+      {/* Live Data Loading Banner */}
+      {isLiveDataLoading && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-emerald-950/95 border-b border-emerald-500/30 px-4 py-2 flex items-center justify-center gap-3 text-xs font-mono backdrop-blur-sm">
+          <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-emerald-300">Loading live NFL player data from Sleeper API + ESPN odds + Open-Meteo weather...</span>
+        </div>
+      )}
+
       {/* Navigation Header with Live ESPN Week 1 Scoreboard */}
       <Navbar
         activeTab={activeTab}
@@ -416,7 +415,7 @@ export function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 ${isLiveDataLoading ? 'mt-8' : ''}`}>
         
         {/* Quick Intelligence Metric Strip — All 4 cards computed from live data */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -578,6 +577,7 @@ export function App() {
           <VegasOddsHub
             players={filteredPlayers}
             settings={leagueSettings}
+            liveGames={liveScores}
             onSelectPlayerDetail={(p) => setSelectedPlayerDetail(p)}
           />
         )}

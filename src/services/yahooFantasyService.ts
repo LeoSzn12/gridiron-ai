@@ -61,7 +61,7 @@ export function getYahooAuthorizationUrl(clientId: string, redirectUri: string, 
 }
 
 /**
- * Exchange Authorization Code for Access Token
+ * Exchange Authorization Code for Access Token (via Netlify server-side proxy to avoid CORS)
  */
 export async function exchangeYahooAuthCode(
   code: string,
@@ -69,36 +69,62 @@ export async function exchangeYahooAuthCode(
   clientSecret: string,
   redirectUri: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
-  const tokenUrl = 'https://api.login.yahoo.com/oauth2/get_token';
-  const credentials = btoa(`${clientId.trim()}:${clientSecret.trim()}`);
-
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    redirect_uri: redirectUri.trim(),
-    code: code.trim(),
-  });
-
-  const res = await fetch(tokenUrl, {
+  // Proxy through Netlify function — Yahoo blocks browser-direct token exchange with CORS
+  const res = await fetch('/api/yahoo-oauth', {
     method: 'POST',
-    headers: {
-      'Authorization': `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: body.toString(),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grantType: 'authorization_code',
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim(),
+      code: code.trim(),
+      redirectUri: redirectUri.trim(),
+    }),
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Yahoo Token Exchange Failed (${res.status}): ${errText}`);
-  }
 
   const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `Yahoo token exchange failed (${res.status})`);
+  }
+
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresIn: data.expires_in,
   };
 }
+
+/**
+ * Refresh Yahoo Access Token (via Netlify proxy)
+ */
+export async function refreshYahooToken(
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string
+): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const res = await fetch('/api/yahoo-oauth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grantType: 'refresh_token',
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim(),
+      refreshToken: refreshToken.trim(),
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `Yahoo token refresh failed (${res.status})`);
+  }
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || refreshToken,
+    expiresIn: data.expires_in,
+  };
+}
+
 
 /**
  * Fetch Current User's NFL Leagues from Yahoo Fantasy API
