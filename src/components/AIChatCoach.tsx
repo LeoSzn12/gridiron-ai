@@ -187,16 +187,43 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
               </div>
 
               {aiConfig.provider === 'gemini' && (
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Gemini API Key</label>
-                  <input
-                    type="password"
-                    value={configApiKey}
-                    onChange={(e) => setConfigApiKey(e.target.value)}
-                    placeholder="AIzaSy..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">Free from Google AI Studio. Stored locally in your browser.</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Gemini Model</label>
+                    <select
+                      value={configModel}
+                      onChange={(e) => setConfigModel(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                    >
+                      <option value="gemini-2.0-flash">⚡ Gemini 2.0 Flash (Fastest, Smartest)</option>
+                      <option value="gemini-1.5-flash">⚡ Gemini 1.5 Flash (Balanced)</option>
+                      <option value="gemini-1.5-pro">🧠 Gemini 1.5 Pro (Deepest Reasoning)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-300 font-semibold">Gemini API Key</label>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-emerald-400 hover:underline"
+                      >
+                        Get Free Key from Google AI Studio →
+                      </a>
+                    </div>
+                    <input
+                      type="password"
+                      value={configApiKey}
+                      onChange={(e) => setConfigApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Free tier provides 1,500 requests/day. Key is stored securely in your browser.
+                    </p>
+                  </div>
                 </div>
               )}
 

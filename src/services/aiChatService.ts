@@ -18,10 +18,22 @@ export function getSavedAIConfig(): AIProviderConfig {
   } catch {
     // ignore
   }
+
+  // Check if env variable is provided (e.g. from Netlify or .env)
+  const envApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (envApiKey) {
+    return {
+      provider: 'gemini',
+      apiKey: envApiKey,
+      localEndpoint: 'http://localhost:11434/v1',
+      modelName: 'gemini-2.0-flash',
+    };
+  }
+
   return {
     provider: 'built-in-neural',
     localEndpoint: 'http://localhost:11434/v1',
-    modelName: 'gemini-1.5-flash',
+    modelName: 'gemini-2.0-flash',
   };
 }
 
