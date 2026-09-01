@@ -41,8 +41,8 @@ export function getSavedAIConfig(): AIProviderConfig {
   }
 
   return {
-    provider: 'built-in-neural',
-    localEndpoint: 'https://integrate.api.nvidia.com/v1',
+    provider: 'nvidia-nim',
+    localEndpoint: '/api/ai-chat',
     modelName: 'deepseek-ai/deepseek-v4-flash-0731',
   };
 }
@@ -151,27 +151,56 @@ async function callGeminiAPI(
 }
 
 /**
- * Call NVIDIA NIM API / DeepSeek (OpenAI-compatible)
+ * Call NVIDIA NIM API / DeepSeek (via /api/ai-chat proxy or direct)
  */
 async function callNvidiaNimAPI(
   query: string,
   players: Player[],
   settings: LeagueSettings,
-  apiKey: string,
+  apiKey: string = '',
   modelName: string = 'deepseek-ai/deepseek-v4-flash-0731',
-  baseUrl: string = 'https://integrate.api.nvidia.com/v1',
+  baseUrl: string = '/api/ai-chat',
   myRoster?: Player[],
   opponentRoster?: Player[]
 ): Promise<{ text: string; reasoning?: string }> {
   const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
-  const cleanEndpoint = baseUrl.replace(/\/+$/, '');
+
+  // If using local/Netlify proxy endpoint
+  if (baseUrl === '/api/ai-chat' || baseUrl.startsWith('/')) {
+    const proxyRes = await fetch('/api/ai-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: query,
+        systemPrompt,
+        model: modelName,
+        apiKey: apiKey.trim() || undefined,
+        temperature: 0.7,
+        maxTokens: 4096,
+      }),
+    });
+
+    if (proxyRes.ok) {
+      const data = await proxyRes.json();
+      if (data.text || data.reasoning) {
+        return {
+          text: data.text || data.reasoning,
+          reasoning: data.reasoning || undefined,
+        };
+      }
+    }
+  }
+
+  // Direct endpoint call fallback
+  const cleanEndpoint = (baseUrl === '/api/ai-chat' ? 'https://integrate.api.nvidia.com/v1' : baseUrl).replace(/\/+$/, '');
   const url = `${cleanEndpoint}/chat/completions`;
+  const activeKey = apiKey.trim() || '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';
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey.trim()}`,
+      'Authorization': `Bearer ${activeKey}`,
     },
     body: JSON.stringify({
       model: modelName,
@@ -484,14 +513,14 @@ export async function getAIChatResponseAsync(
   }
 
   // 2. NVIDIA NIM / DeepSeek Cloud API
-  if (config.provider === 'nvidia-nim' && config.apiKey?.trim()) {
+  if (config.provider === 'nvidia-nim') {
     try {
-      const baseUrl = config.localEndpoint || 'https://integrate.api.nvidia.com/v1';
+      const baseUrl = config.localEndpoint || '/api/ai-chat';
       const result = await callNvidiaNimAPI(
         query, 
         players, 
         settings, 
-        config.apiKey.trim(), 
+        config.apiKey?.trim() || '', 
         config.modelName || 'deepseek-ai/deepseek-v4-flash-0731', 
         baseUrl, 
         myRoster, 
@@ -509,7 +538,7 @@ export async function getAIChatResponseAsync(
         timestamp,
         dataBadges: [
           { label: 'AI Model', value: config.modelName?.split('/').pop() || 'DeepSeek Flash', type: 'positive' },
-          { label: 'Infrastructure', value: 'NVIDIA NIM GPU Cloud', type: 'neutral' },
+          { label: 'Infrastructure', value: 'NVIDIA GPU Cloud', type: 'neutral' },
           ...(result.reasoning ? [{ label: 'Reasoning', value: 'DeepSeek Thinking', type: 'positive' as const }] : []),
         ],
       };
