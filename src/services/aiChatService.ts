@@ -430,9 +430,6 @@ export async function getAIChatResponseAsync(
     console.warn('External AI call failed:', errMsg);
     
     // Surface the real error to the user rather than silently falling back
-    const isKeyError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('api key') || errMsg.toLowerCase().includes('unauthorized');
-    const isModelError = errMsg.toLowerCase().includes('404') || errMsg.toLowerCase().includes('model') || errMsg.toLowerCase().includes('not found');
-    
     const providerName = config.provider === 'openrouter' ? 'OpenRouter' :
       config.provider === 'nvidia-nim' ? 'NVIDIA' :
       config.provider === 'openai' ? 'OpenAI' :
@@ -442,13 +439,9 @@ export async function getAIChatResponseAsync(
     
     return {
       ...heuristicFallback,
-      text: isKeyError
-        ? `⚠️ **${providerName} API Key Issue** — Please enter your API key in AI Settings (⚙️ icon) or set the \`${config.provider === 'openrouter' ? 'OPENROUTER_API_KEY' : 'NVIDIA_API_KEY'}\` environment variable in Netlify.\n\n_Error: ${errMsg}_\n\n---\n\n${heuristicFallback.text}`
-        : isModelError
-        ? `⚠️ **Model Not Found** — The model \`${config.modelName}\` was not recognized by ${providerName}. Please select an available model in AI Settings.\n\n---\n\n${heuristicFallback.text}`
-        : `⚠️ **AI Connection Issue** — ${errMsg}\n\nCheck AI Settings (⚙️ icon) → Test Connection to debug. Here's local analysis in the meantime:\n\n---\n\n${heuristicFallback.text}`,
+      text: `⚠️ **${providerName} Connection Error**\n\nFailed to connect to \`${config.modelName}\`. The provider returned the following error:\n\n> \`${errMsg}\`\n\nEnsure your API key is correct in AI Settings (⚙️ icon). In the meantime, here is the local heuristic analysis:\n\n---\n\n${heuristicFallback.text}`,
       dataBadges: [
-        { label: 'AI Status', value: '⚠️ Connection Issue', type: 'warning' as const },
+        { label: 'AI Status', value: '⚠️ API Error', type: 'warning' as const },
         { label: 'Fallback', value: 'Local Engine', type: 'neutral' as const },
       ],
     };
