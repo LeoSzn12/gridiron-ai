@@ -569,7 +569,19 @@ export async function buildLivePlayersDatabase(
 
       // Check if we have enriched static data to merge
       const normName = raw.full_name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const existing = existingById.get(raw.player_id) || existingByName.get(normName);
+      let existing = existingById.get(raw.player_id);
+      
+      if (!existing) {
+        // Only match by name if the position roughly matches (Offense vs Defense)
+        const nameMatch = existingByName.get(normName);
+        if (nameMatch) {
+          const isOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(posTyped);
+          const existingIsOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(nameMatch.position);
+          if (isOffense === existingIsOffense) {
+            existing = nameMatch;
+          }
+        }
+      }
 
       // Live projection stats
       const proj = projectionsMap[raw.player_id] || {};
@@ -586,6 +598,9 @@ export async function buildLivePlayersDatabase(
         // Merge: keep all rich static data but overlay live fields
         liveBuilt.push({
           ...existing,
+          id: raw.player_id, // Use real live ID to avoid duplicates
+          position: posTyped, // Use real live position
+          team: team, // Use real live team
           injuryStatus,
           injuryNote: raw.injury_notes || existing.injuryNote,
           avatar, // real Sleeper photo
