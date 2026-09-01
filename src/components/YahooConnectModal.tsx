@@ -34,6 +34,10 @@ interface YahooConnectModalProps {
   onImportMyRoster: (playerIds: string[], teamName?: string) => void;
   onImportOpponentRoster: (playerIds: string[], teamName?: string) => void;
   onImportWaiverTargets?: (playerIds: string[]) => void;
+  newsItems?: any[];
+  rosterAlertCount?: number;
+  isYahooSyncing?: boolean;
+  yahooSyncStatus?: 'idle' | 'synced' | 'error';
 }
 
 export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({

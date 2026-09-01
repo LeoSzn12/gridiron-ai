@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { Player, LeagueSettings, PlayerPosition } from '../types';
 import { evaluateTrade, calculateProjection } from '../services/aiEngine';
 import { 
@@ -43,9 +43,28 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
 }) => {
   // Trade Setup
   const [tradeMode, setTradeMode] = useState<'2-team' | '3-team'>('2-team');
-  const [sideAPlayerIds, setSideAPlayerIds] = useState<string[]>(['patrick-mahomes', 'brian-thomas-jr']);
-  const [sideBPlayerIds, setSideBPlayerIds] = useState<string[]>(['saquon-barkley']);
-  const [sideCPlayerIds, setSideCPlayerIds] = useState<string[]>(['brock-bowers']);
+  // Default Side A = top QB from live data; Side B = top RB from live data
+  const defaultSideA = useMemo(() => {
+    const qb = players.filter(p => p.position === 'QB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+    const wr = players.filter(p => p.position === 'WR').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+    return [qb?.id, wr?.id].filter(Boolean) as string[];
+  }, [players.length]);
+
+  const defaultSideB = useMemo(() => {
+    const rb = players.filter(p => p.position === 'RB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+    return [rb?.id].filter(Boolean) as string[];
+  }, [players.length]);
+
+  const [sideAPlayerIds, setSideAPlayerIds] = useState<string[]>([]);
+  const [sideBPlayerIds, setSideBPlayerIds] = useState<string[]>([]);
+  const [sideCPlayerIds, setSideCPlayerIds] = useState<string[]>([]);
+
+  // Once live players load, set defaults if sides are empty
+  useEffect(() => {
+    if (sideAPlayerIds.length === 0 && defaultSideA.length > 0) setSideAPlayerIds(defaultSideA);
+    if (sideBPlayerIds.length === 0 && defaultSideB.length > 0) setSideBPlayerIds(defaultSideB);
+  }, [defaultSideA.join(','), defaultSideB.join(',')]);
+
 
   const [sideAPicks, setSideAPicks] = useState<DraftPickAsset[]>([]);
   const [sideBPicks, setSideBPicks] = useState<DraftPickAsset[]>([]);
@@ -60,31 +79,44 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
   const sideBPlayers = useMemo(() => sideBPlayerIds.map(id => players.find(p => p.id === id)).filter((p): p is Player => p !== undefined), [sideBPlayerIds, players]);
   const sideCPlayers = useMemo(() => sideCPlayerIds.map(id => players.find(p => p.id === id)).filter((p): p is Player => p !== undefined), [sideCPlayerIds, players]);
 
-  // Evaluate Trade
+  // Evaluate Trade — uses your exact league scoring via calculateProjection
   const tradeEval = useMemo(() => {
     return evaluateTrade(sideAPlayers, sideBPlayers, settings);
   }, [sideAPlayers, sideBPlayers, settings]);
 
-  // Compute Total Values including Draft Picks
+  // REST-OF-SEASON value: projected weekly pts × remaining weeks (14 - current week est.)
+  // This is what matters for trade decisions — NOT static trade value index
+  const remainingWeeks = 14; // conservative estimate
+  
+  const calcROSValue = (p: Player) => {
+    const proj = calculateProjection(p, settings);
+    return Number((proj.projectedPoints * remainingWeeks).toFixed(0));
+  };
+
+  // Compute Total Values including Draft Picks — using live custom-scoring projections
   const totalValueA = useMemo(() => {
-    const playersVal = sideAPlayers.reduce((sum, p) => sum + (p.tradeValue || 0), 0);
-    const picksVal = sideAPicks.reduce((sum, pk) => sum + pk.value, 0);
+    const playersVal = sideAPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
+    const picksVal = sideAPicks.reduce((sum, pk) => sum + pk.value * remainingWeeks, 0);
     return playersVal + picksVal;
-  }, [sideAPlayers, sideAPicks]);
+  }, [sideAPlayers, sideAPicks, settings]);
 
   const totalValueB = useMemo(() => {
-    const playersVal = sideBPlayers.reduce((sum, p) => sum + (p.tradeValue || 0), 0);
-    const picksVal = sideBPicks.reduce((sum, pk) => sum + pk.value, 0);
+    const playersVal = sideBPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
+    const picksVal = sideBPicks.reduce((sum, pk) => sum + pk.value * remainingWeeks, 0);
     return playersVal + picksVal;
-  }, [sideBPlayers, sideBPicks]);
+  }, [sideBPlayers, sideBPicks, settings]);
 
   const totalValueC = useMemo(() => {
-    return sideCPlayers.reduce((sum, p) => sum + (p.tradeValue || 0), 0);
-  }, [sideCPlayers]);
+    return sideCPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
+  }, [sideCPlayers, settings]);
 
-  // Projected Weekly Points per side
+  // Projected Weekly Points per side (for display)
   const sideAWeeklyPts = useMemo(() => sideAPlayers.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0), [sideAPlayers, settings]);
   const sideBWeeklyPts = useMemo(() => sideBPlayers.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0), [sideBPlayers, settings]);
+
+
+
+
 
   // Available Players for selection modal
   const availableForSelection = useMemo(() => {
@@ -97,8 +129,9 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
         return p.name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q) || p.position.toLowerCase() === q;
       }
       return true;
-    }).sort((a, b) => (b.tradeValue || 0) - (a.tradeValue || 0));
-  }, [players, sideAPlayerIds, sideBPlayerIds, sideCPlayerIds, playerSearchQuery, playerPosFilter]);
+    }).sort((a, b) => calcROSValue(b) - calcROSValue(a)); // sort by live ROS value
+  }, [players, sideAPlayerIds, sideBPlayerIds, sideCPlayerIds, playerSearchQuery, playerPosFilter, settings]);
+
 
   const handleAddPlayer = (side: 'A' | 'B' | 'C', playerId: string) => {
     if (side === 'A') setSideAPlayerIds(prev => [...prev, playerId]);
@@ -137,22 +170,31 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
   };
 
   const tradePresets = useMemo(() => {
+    const byPos = (pos: string, n = 1) => players
+      .filter(p => p.position === pos)
+      .sort((a, b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)
+      .slice(0, n).map(p => p.id);
+
+    const [topQB] = byPos('QB');
+    const [topRB] = byPos('RB');
+    const [topWR, wr2] = byPos('WR', 2);
+    const [topTE] = byPos('TE');
+
     const list = [];
-    if (myRoster.length >= 2) {
-      list.push({
-        label: `⭐ Trade ${myRoster[0].name.split(' ')[1] || myRoster[0].name} for Top RB`,
-        a: [myRoster[0].id],
-        b: ['saquon-barkley'],
-      });
+    if (myRoster.length >= 1) {
+      const myQB = myRoster.find(p => p.position === 'QB');
+      if (myQB && topRB) {
+        list.push({ label: `⭐ My ${myQB.name.split(' ').pop()} ⇄ Top RB`, a: [myQB.id], b: [topRB] });
+      }
     }
     return [
       ...list,
-      { label: '🔥 Mahomes + Brian Thomas ⇄ Saquon', a: ['patrick-mahomes', 'brian-thomas-jr'], b: ['saquon-barkley'] },
-      { label: '⚡ Lamar Jackson ⇄ Justin Jefferson + Pick', a: ['lamar-jackson'], b: ['justin-jefferson'] },
-      { label: '📈 Brock Bowers ⇄ Derrick Henry', a: ['brock-bowers'], b: ['derrick-henry'] },
-      { label: '🛡️ Maxx Crosby (IDP) ⇄ Jayden Daniels', a: ['maxx-crosby'], b: ['jayden-daniels'] },
-    ];
-  }, [myRoster]);
+      ...(topQB && topWR ? [{ label: `🔥 Top QB + WR ⇄ Top RB`, a: [topQB, wr2 || topWR], b: [topRB || ''] }] : []),
+      ...(topWR && topTE ? [{ label: `⚡ Top WR ⇄ Top TE`, a: [topWR], b: [topTE] }] : []),
+      ...(topQB && topRB ? [{ label: `📈 Top QB ⇄ Top RB`, a: [topQB], b: [topRB] }] : []),
+    ].filter(p => p.a.every(Boolean) && p.b.every(Boolean));
+  }, [players.length, myRoster, settings]);
+
 
   return (
     <div className="space-y-6">

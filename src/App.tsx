@@ -13,6 +13,8 @@ import {
   saveRosterMetadata,
   type RosterMetadata
 } from './services/rosterService';
+import { getYahooAuthConfig, autoSyncYahooRoster } from './services/yahooFantasyService';
+import { fetchLiveNewsAndInjuries, getMyRosterAlertCount, type PlayerNewsItem } from './services/injuryNewsService';
 import { 
   getAllLeagueProfiles, 
   getActiveLeagueProfile, 
@@ -122,6 +124,10 @@ export function App() {
 
   const [playersList, setPlayersList] = useState<Player[]>(PLAYERS_DATABASE);
   const [liveScores, setLiveScores] = useState<LiveNFLGameScore[]>([]);
+  const [newsItems, setNewsItems] = useState<PlayerNewsItem[]>([]);
+  const [rosterAlertCount, setRosterAlertCount] = useState(0);
+  const [isYahooSyncing, setIsYahooSyncing] = useState(false);
+  const [yahooSyncStatus, setYahooSyncStatus] = useState<'idle' | 'synced' | 'error'>('idle');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPlayerDetail, setSelectedPlayerDetail] = useState<Player | null>(null);
 
@@ -237,6 +243,59 @@ export function App() {
       clearInterval(scoreRefresh);
     };
   }, []); // runs once on mount — leagueSettings dependency removed to avoid re-fetching 3000 players on every settings change
+
+  // Auto-sync Yahoo roster if connected
+  useEffect(() => {
+    const yahooAuth = getYahooAuthConfig();
+    if (!yahooAuth.isConnected || !yahooAuth.accessToken || !yahooAuth.selectedTeamKey || !yahooAuth.selectedLeagueKey) return;
+    let isMounted = true;
+    const syncRoster = async () => {
+      setIsYahooSyncing(true);
+      try {
+        const result = await autoSyncYahooRoster(
+          yahooAuth.accessToken!,
+          yahooAuth.selectedTeamKey!,
+          yahooAuth.selectedLeagueKey!,
+          playersList
+        );
+        if (!isMounted) return;
+        if (result.myRosterIds.length > 0) {
+          setMyRosterIds(result.myRosterIds);
+          setOpponentRosterIds(result.opponentRosterIds);
+          setRosterMeta(prev => ({
+            ...prev,
+            userTeamName: result.myTeamName,
+            opponentTeamName: result.opponentTeamName,
+            week: result.weekNum,
+          }));
+          setYahooSyncStatus('synced');
+        }
+      } catch (err) {
+        console.warn('Yahoo auto-sync failed:', err);
+        if (isMounted) setYahooSyncStatus('error');
+      } finally {
+        if (isMounted) setIsYahooSyncing(false);
+      }
+    };
+    // Only sync once playersList is loaded from Sleeper (>300 players means live data ready)
+    if (playersList.length > 300) syncRoster();
+    return () => { isMounted = false; };
+  }, [playersList.length]); // re-run when live player DB is ready
+
+  // Fetch live injury/news feed
+  useEffect(() => {
+    let isMounted = true;
+    const loadNews = async () => {
+      const news = await fetchLiveNewsAndInjuries(myRosterIds);
+      if (!isMounted) return;
+      setNewsItems(news);
+      setRosterAlertCount(getMyRosterAlertCount(news, myRosterIds));
+    };
+    loadNews();
+    // Refresh every 15 minutes
+    const interval = setInterval(loadNews, 15 * 60 * 1000);
+    return () => { isMounted = false; clearInterval(interval); };
+  }, [myRosterIds]);
 
 
   // Derived user roster & opponent roster
@@ -679,6 +738,10 @@ export function App() {
         onImportMyRoster={handleImportYahooMyRoster}
         onImportOpponentRoster={handleImportYahooOpponentRoster}
         onImportWaiverTargets={handleImportYahooWaivers}
+        newsItems={newsItems}
+        rosterAlertCount={rosterAlertCount}
+        isYahooSyncing={isYahooSyncing}
+        yahooSyncStatus={yahooSyncStatus}
       />
 
       {/* Mobile Sticky Bottom Navigation Bar */}

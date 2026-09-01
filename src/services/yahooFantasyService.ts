@@ -177,6 +177,163 @@ export async function fetchYahooUserLeagues(accessToken: string): Promise<YahooU
 }
 
 /**
+ * Fetch the user's team roster for a specific league from Yahoo Fantasy API.
+ * Returns player names + positions that can be matched to our live player DB.
+ */
+export async function fetchYahooTeamRoster(
+  accessToken: string,
+  _leagueKey: string,
+  teamKey: string
+): Promise<{ playerName: string; position: string; status: string; teamAbbr: string }[]> {
+  const url = `https://fantasysports.yahooapis.com/fantasy/v2/team/${teamKey}/roster?format=json`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!res.ok) throw new Error(`Yahoo roster fetch failed (${res.status})`);
+    const data = await res.json();
+    const players: { playerName: string; position: string; status: string; teamAbbr: string }[] = [];
+    const rosterPlayers = data?.fantasy_content?.team?.[1]?.roster?.['0']?.players;
+    if (!rosterPlayers) return players;
+    Object.values(rosterPlayers).forEach((item: any) => {
+      if (!item?.player) return;
+      const pInfo = item.player[0];
+      const nameObj = pInfo?.find?.((x: any) => x?.name);
+      const posObj = pInfo?.find?.((x: any) => x?.display_position);
+      const teamObj = pInfo?.find?.((x: any) => x?.editorial_team_abbr);
+      const statusObj = pInfo?.find?.((x: any) => x?.status !== undefined);
+      players.push({
+        playerName: nameObj?.name?.full || '',
+        position: posObj?.display_position || '',
+        status: statusObj?.status || 'Active',
+        teamAbbr: teamObj?.editorial_team_abbr || '',
+      });
+    });
+    return players.filter(p => p.playerName);
+  } catch (err) {
+    console.warn('Yahoo roster fetch failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch the current week's matchup for the user's team.
+ * Returns both the user's team info and their opponent's team info.
+ */
+export async function fetchYahooCurrentMatchup(
+  accessToken: string,
+  teamKey: string,
+  week?: number
+): Promise<{
+  myTeamName: string;
+  myTeamKey: string;
+  opponentTeamName: string;
+  opponentTeamKey: string;
+  weekNum: number;
+  myProjectedScore: number;
+  opponentProjectedScore: number;
+} | null> {
+  const weekParam = week ? `;week=${week}` : '';
+  const url = `https://fantasysports.yahooapis.com/fantasy/v2/team/${teamKey}/matchups${weekParam}?format=json`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const matchups = data?.fantasy_content?.team?.[1]?.matchups;
+    if (!matchups) return null;
+    // Find current/latest matchup
+    const matchupKeys = Object.keys(matchups).filter(k => k !== 'count');
+    const latestKey = matchupKeys[matchupKeys.length - 1];
+    const matchup = matchups[latestKey]?.matchup;
+    if (!matchup) return null;
+    const weekNum = matchup?.week || week || 1;
+    const teams = matchup?.['0']?.teams;
+    if (!teams) return null;
+    const team0 = teams?.['0']?.team;
+    const team1 = teams?.['1']?.team;
+    const myTeamName = team0?.[0]?.find((x: any) => x?.name)?.name || 'My Team';
+    const myTeamKey = team0?.[0]?.find((x: any) => x?.team_key)?.team_key || teamKey;
+    const myProjectedScore = parseFloat(team0?.[1]?.team_projected_points?.projected_points || '0');
+    const opponentTeamName = team1?.[0]?.find((x: any) => x?.name)?.name || 'Opponent';
+    const opponentTeamKey = team1?.[0]?.find((x: any) => x?.team_key)?.team_key || '';
+    const opponentProjectedScore = parseFloat(team1?.[1]?.team_projected_points?.projected_points || '0');
+    return { myTeamName, myTeamKey, opponentTeamName, opponentTeamKey, weekNum, myProjectedScore, opponentProjectedScore };
+  } catch (err) {
+    console.warn('Yahoo matchup fetch failed:', err);
+    return null;
+  }
+}
+
+/**
+ * Auto-sync: given a saved Yahoo auth + connected league, fetch roster and matchup
+ * and return player IDs matched against our live Sleeper player database.
+ */
+export async function autoSyncYahooRoster(
+  accessToken: string,
+  teamKey: string,
+  leagueKey: string,
+  allPlayers: Player[]
+): Promise<{
+  myRosterIds: string[];
+  opponentRosterIds: string[];
+  myTeamName: string;
+  opponentTeamName: string;
+  weekNum: number;
+  myProjectedScore: number;
+  opponentProjectedScore: number;
+}> {
+  // Build name index for matching
+  function normName(n: string) { return n.toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  const nameIndex = new Map<string, string>(); // normalized name -> player.id
+  allPlayers.forEach(p => {
+    nameIndex.set(normName(p.name), p.id);
+    // Also index first initial + last name (e.g. jallen)
+    const tokens = p.name.split(' ');
+    if (tokens.length >= 2) nameIndex.set(`${tokens[0][0].toLowerCase()}${tokens[tokens.length-1].toLowerCase()}`, p.id);
+  });
+  function matchToId(name: string): string | null {
+    const norm = normName(name);
+    if (nameIndex.has(norm)) return nameIndex.get(norm)!;
+    // Fuzzy: find player whose normalized name includes the key
+    for (const [key, id] of nameIndex) {
+      if (key.includes(norm) || norm.includes(key)) {
+        if (key.length > 4 && norm.length > 4) return id;
+      }
+    }
+    return null;
+  }
+
+  const [myRosterRaw, matchupData] = await Promise.all([
+    fetchYahooTeamRoster(accessToken, leagueKey, teamKey),
+    fetchYahooCurrentMatchup(accessToken, teamKey),
+  ]);
+
+  const myRosterIds = myRosterRaw
+    .map(p => matchToId(p.playerName))
+    .filter((id): id is string => id !== null);
+
+  let opponentRosterIds: string[] = [];
+  if (matchupData?.opponentTeamKey) {
+    const oppRaw = await fetchYahooTeamRoster(accessToken, leagueKey, matchupData.opponentTeamKey);
+    opponentRosterIds = oppRaw
+      .map(p => matchToId(p.playerName))
+      .filter((id): id is string => id !== null);
+  }
+
+  return {
+    myRosterIds,
+    opponentRosterIds,
+    myTeamName: matchupData?.myTeamName || 'My Team',
+    opponentTeamName: matchupData?.opponentTeamName || 'Opponent',
+    weekNum: matchupData?.weekNum || 1,
+    myProjectedScore: matchupData?.myProjectedScore || 0,
+    opponentProjectedScore: matchupData?.opponentProjectedScore || 0,
+  };
+}
+
+/**
  * -------------------------------------------------------------
  * FAST-PASTE & TEXT ROSTER PARSER ENGINE
  * Allows users to paste any copied text, table, or CSV from Yahoo
