@@ -22,9 +22,8 @@ const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v2';
 
 export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: string; description: string }>> = {
   'openrouter': [
-    { id: 'deepseek/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash', description: '🔥 Ultra-fast DeepSeek V4 reasoning & analysis on OpenRouter' },
-    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
     { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', description: 'Industry-leading benchmark intelligence & value' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', description: 'Deepest NFL tactical reasoning & scheme mastery' },
     { id: 'openai/gpt-4o', name: 'ChatGPT-4o', description: 'Top-tier analytical precision & start/sit clarity' },
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', description: 'Ultra-fast multimodal search & live speed' },
@@ -62,12 +61,13 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
   ]
 };
 
-export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
+export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-chat';
 
 export function getSavedAIConfig(): AIProviderConfig {
-  // Stale or broken configs to automatically migrate to OpenRouter + DeepSeek V4 Flash
+  // Stale or broken configs to automatically migrate to OpenRouter + DeepSeek
   const STALE_OR_MIGRATE = new Set([
-    'deepseek/deepseek-r1',
+    'deepseek/deepseek-r1', // (If you want them on chat vs r1, but let's just migrate broken ones)
+    'deepseek/deepseek-v4-flash-0731', // The one that caused the 404
     'deepseek-ai/deepseek-r1',
     'moonshotai/kimi-k3',
     'nvidia/llama-3.1-nemotron-70b-instruct',
@@ -78,7 +78,7 @@ export function getSavedAIConfig(): AIProviderConfig {
     const saved = localStorage.getItem(DEFAULT_CONFIG_STORAGE_KEY);
     if (saved) {
       const parsed: AIProviderConfig = JSON.parse(saved);
-      // If user was on nvidia-nim (not working) or had stale model without openrouter key, migrate
+      // If user was on nvidia-nim (not working) or had stale/invalid model
       const needsMigration = 
         parsed.provider === 'nvidia-nim' || 
         STALE_OR_MIGRATE.has(parsed.modelName || '');

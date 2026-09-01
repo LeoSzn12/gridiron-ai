@@ -243,7 +243,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                             body: JSON.stringify({
                               prompt: 'Reply with exactly: OPENROUTER_OK',
                               provider: 'openrouter',
-                              model: configModel || 'deepseek/deepseek-v4-flash-0731',
+                              model: configModel || 'deepseek/deepseek-chat',
                               apiKey: key,
                               maxTokens: 16,
                               temperature: 0,
