@@ -229,8 +229,46 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                     placeholder="sk-or-v1-..."
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
                   />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const key = configApiKey.trim();
+                        if (!key) { setTestStatus('⚠️ Enter your sk-or-... key first.'); return; }
+                        setTestStatus('🔄 Testing OpenRouter connection...');
+                        try {
+                          const res = await fetch('/api/ai-chat', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              prompt: 'Reply with exactly: OPENROUTER_OK',
+                              provider: 'openrouter',
+                              model: configModel || 'deepseek/deepseek-v4-flash-0731',
+                              apiKey: key,
+                              maxTokens: 16,
+                              temperature: 0,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.error) {
+                            setTestStatus(`❌ ${data.error}`);
+                          } else {
+                            setTestStatus(`✅ OpenRouter connected! Model: ${configModel?.split('/').pop()}`);
+                          }
+                        } catch (err: any) {
+                          setTestStatus(`❌ Connection failed: ${err.message}`);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-purple-900/50 hover:bg-purple-800/60 border border-purple-500/40 text-purple-300 text-[11px] font-bold font-mono cursor-pointer transition-all"
+                    >
+                      Test Connection
+                    </button>
+                    {testStatus && (
+                      <span className="text-[11px] font-mono text-slate-300 truncate">{testStatus}</span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    Enables Claude 3.5 Sonnet, GPT-4o, DeepSeek R1, and Gemini with a single API key.
+                    Enables DeepSeek V4 Flash, DeepSeek R1, Claude 3.5 Sonnet, GPT-4o, and Gemini with a single API key.
                   </p>
                 </div>
               )}

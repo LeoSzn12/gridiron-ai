@@ -27,7 +27,7 @@ export default async (req: Request) => {
       prompt, 
       systemPrompt, 
       provider = 'openrouter',
-      model = 'anthropic/claude-3.5-sonnet',
+      model = 'deepseek/deepseek-v4-flash-0731',
       apiKey,
       temperature = 0.7,
       maxTokens = 4096
@@ -55,8 +55,16 @@ export default async (req: Request) => {
 
     if (provider === 'openrouter') {
       targetUrl = 'https://openrouter.ai/api/v1/chat/completions';
-      const key = apiKey || process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '';
-      authHeader = `Bearer ${key.trim()}`;
+      const key = (apiKey || process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_API_KEY || '').trim();
+      if (!key) {
+        return new Response(JSON.stringify({
+          error: 'OpenRouter API key is required. Add your sk-or-... key in AI Settings (⚙️ icon) or set the OPENROUTER_API_KEY environment variable in your Netlify dashboard.'
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      }
+      authHeader = `Bearer ${key}`;
       extraHeaders = {
         'HTTP-Referer': 'https://fantasy-gridiron-ai.netlify.app/',
         'X-Title': 'Gridiron AI',

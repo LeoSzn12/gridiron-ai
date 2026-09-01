@@ -22,9 +22,11 @@ const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v2';
 
 export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: string; description: string }>> = {
   'openrouter': [
+    { id: 'deepseek/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash', description: '🔥 Ultra-fast DeepSeek V4 reasoning & analysis on OpenRouter' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', description: 'Industry-leading benchmark intelligence & value' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', description: 'Deepest NFL tactical reasoning & scheme mastery' },
     { id: 'openai/gpt-4o', name: 'ChatGPT-4o', description: 'Top-tier analytical precision & start/sit clarity' },
-    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', description: 'Ultra-fast multimodal search & live speed' },
     { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', description: 'Open-weights powerhouse' },
   ],
@@ -43,11 +45,11 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
     { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Balanced everyday performer' },
   ],
   'nvidia-nim': [
-    { id: 'moonshotai/kimi-k3', name: 'Kimi K3 (NVIDIA)', description: '🔥 Moonshot AI — ultra-smart reasoning via NVIDIA NIM' },
+    { id: 'moonshotai/kimi-k3', name: 'Kimi K3 (NVIDIA)', description: 'Moonshot AI via NVIDIA NIM' },
     { id: 'deepseek-ai/deepseek-r1', name: 'DeepSeek R1 (NVIDIA)', description: 'Chain-of-thought reasoning — GPU accelerated' },
-    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama Nemotron 70B', description: "NVIDIA's own flagship instruct model" },
-    { id: 'thudm/glm-4-9b-chat', name: 'GLM-4 9B (NVIDIA)', description: 'THUDM GLM-4 — fast and accurate via NIM' },
-    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', description: 'High-throughput instruct model on NVIDIA NIM' },
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', name: 'Llama Nemotron 70B', description: "NVIDIA's flagship instruct model" },
+    { id: 'thudm/glm-4-9b-chat', name: 'GLM-4 9B (NVIDIA)', description: 'THUDM GLM-4 via NIM' },
+    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', description: 'High-throughput instruct model' },
     { id: 'mistralai/mistral-large', name: 'Mistral Large (NVIDIA)', description: 'Fast frontier model via NVIDIA NIM' },
   ],
   'local-llm': [
@@ -60,29 +62,33 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
   ]
 };
 
+export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
+
 export function getSavedAIConfig(): AIProviderConfig {
-  // Known broken/deprecated model IDs that should be migrated to kimi-k3
-  const MIGRATE_MODELS = new Set([
-    'deepseek/deepseek-r1',       // wrong namespace format
-    'deepseek-ai/deepseek-r1',    // requires special NVIDIA tier
-    'anthropic/claude-3.5-sonnet', // openrouter fallback — user likely never set this
+  // Stale or broken configs to automatically migrate to OpenRouter + DeepSeek V4 Flash
+  const STALE_OR_MIGRATE = new Set([
+    'deepseek/deepseek-r1',
+    'deepseek-ai/deepseek-r1',
+    'moonshotai/kimi-k3',
+    'nvidia/llama-3.1-nemotron-70b-instruct',
+    'anthropic/claude-3.5-sonnet',
   ]);
 
   try {
     const saved = localStorage.getItem(DEFAULT_CONFIG_STORAGE_KEY);
     if (saved) {
       const parsed: AIProviderConfig = JSON.parse(saved);
-      // Auto-migrate stale/broken configs → Kimi K3 on NVIDIA NIM
-      const needsMigration =
-        MIGRATE_MODELS.has(parsed.modelName || '') ||
-        (parsed.provider === 'openrouter' && !parsed.apiKey?.trim()); // never configured
+      // If user was on nvidia-nim (not working) or had stale model without openrouter key, migrate
+      const needsMigration = 
+        parsed.provider === 'nvidia-nim' || 
+        STALE_OR_MIGRATE.has(parsed.modelName || '');
+      
       if (needsMigration) {
         const migrated: AIProviderConfig = {
-          provider: 'nvidia-nim',
-          apiKey: parsed.provider === 'nvidia-nim' ? (parsed.apiKey || '') : '',
-          modelName: 'moonshotai/kimi-k3',
+          provider: 'openrouter',
+          apiKey: parsed.provider === 'openrouter' ? (parsed.apiKey || '') : '',
+          modelName: DEFAULT_OPENROUTER_MODEL,
         };
-        // Save the migrated config so next load is clean
         localStorage.setItem(DEFAULT_CONFIG_STORAGE_KEY, JSON.stringify(migrated));
         return migrated;
       }
@@ -92,31 +98,21 @@ export function getSavedAIConfig(): AIProviderConfig {
     // ignore
   }
 
-  // Check if OpenRouter key is provided via env (VITE_ prefix required for frontend exposure)
+  // Check if OpenRouter key is provided via env
   const envOpenRouterKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY || '';
   if (envOpenRouterKey) {
     return {
       provider: 'openrouter',
       apiKey: envOpenRouterKey,
-      modelName: 'anthropic/claude-3.5-sonnet',
+      modelName: DEFAULT_OPENROUTER_MODEL,
     };
   }
 
-  // Check if NVIDIA key is provided via env (VITE_ prefix required for frontend exposure)
-  const envNvidiaKey = (import.meta as any).env?.VITE_NVIDIA_API_KEY || '';
-  if (envNvidiaKey) {
-    return {
-      provider: 'nvidia-nim',
-      apiKey: envNvidiaKey,
-      modelName: 'moonshotai/kimi-k3',
-    };
-  }
-
-  // Default: NVIDIA NIM + Kimi K3 — Netlify function handles auth server-side
+  // Default: OpenRouter + DeepSeek V4 Flash
   return {
-    provider: 'nvidia-nim',
+    provider: 'openrouter',
     apiKey: '',
-    modelName: 'moonshotai/kimi-k3',
+    modelName: DEFAULT_OPENROUTER_MODEL,
   };
 }
 
@@ -437,17 +433,22 @@ export async function getAIChatResponseAsync(
     const isKeyError = errMsg.toLowerCase().includes('401') || errMsg.toLowerCase().includes('api key') || errMsg.toLowerCase().includes('unauthorized');
     const isModelError = errMsg.toLowerCase().includes('404') || errMsg.toLowerCase().includes('model') || errMsg.toLowerCase().includes('not found');
     
+    const providerName = config.provider === 'openrouter' ? 'OpenRouter' :
+      config.provider === 'nvidia-nim' ? 'NVIDIA' :
+      config.provider === 'openai' ? 'OpenAI' :
+      config.provider === 'anthropic' ? 'Anthropic' : 'AI Provider';
+
     const heuristicFallback = generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
     
     return {
       ...heuristicFallback,
       text: isKeyError
-        ? `⚠️ **NVIDIA API Key Issue** — Please update your \`NVIDIA_API_KEY\` in Netlify environment variables with your current key, then redeploy.\n\n_Error: ${errMsg}_\n\n---\n\n${heuristicFallback.text}`
+        ? `⚠️ **${providerName} API Key Issue** — Please enter your API key in AI Settings (⚙️ icon) or set the \`${config.provider === 'openrouter' ? 'OPENROUTER_API_KEY' : 'NVIDIA_API_KEY'}\` environment variable in Netlify.\n\n_Error: ${errMsg}_\n\n---\n\n${heuristicFallback.text}`
         : isModelError
-        ? `⚠️ **Model Not Found** — The model \`${config.modelName}\` may not be available on your NVIDIA subscription. Try switching to **Kimi K3** or **Nemotron 70B** in AI Settings.\n\n---\n\n${heuristicFallback.text}`
-        : `⚠️ **AI Connection Issue** — ${errMsg}\n\nCheck AI Settings → Test Connection to debug. Here's local analysis in the meantime:\n\n---\n\n${heuristicFallback.text}`,
+        ? `⚠️ **Model Not Found** — The model \`${config.modelName}\` was not recognized by ${providerName}. Please select an available model in AI Settings.\n\n---\n\n${heuristicFallback.text}`
+        : `⚠️ **AI Connection Issue** — ${errMsg}\n\nCheck AI Settings (⚙️ icon) → Test Connection to debug. Here's local analysis in the meantime:\n\n---\n\n${heuristicFallback.text}`,
       dataBadges: [
-        { label: 'AI Status', value: '⚠️ Connection Failed', type: 'warning' as const },
+        { label: 'AI Status', value: '⚠️ Connection Issue', type: 'warning' as const },
         { label: 'Fallback', value: 'Local Engine', type: 'neutral' as const },
       ],
     };
