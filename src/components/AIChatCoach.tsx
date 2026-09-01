@@ -177,14 +177,78 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                 <label className="block text-slate-300 font-semibold mb-1">Provider Mode</label>
                 <select
                   value={aiConfig.provider}
-                  onChange={(e) => setAiConfig({ ...aiConfig, provider: e.target.value as any })}
+                  onChange={(e) => {
+                    const newProvider = e.target.value as any;
+                    const defaultModel = 
+                      newProvider === 'nvidia-nim' ? 'deepseek-ai/deepseek-v4-flash-0731' :
+                      newProvider === 'gemini' ? 'gemini-2.0-flash' : 'llama3';
+                    const defaultEndpoint = 
+                      newProvider === 'nvidia-nim' ? 'https://integrate.api.nvidia.com/v1' : 'http://localhost:11434/v1';
+                    setAiConfig({ ...aiConfig, provider: newProvider });
+                    setConfigModel(defaultModel);
+                    setConfigEndpoint(defaultEndpoint);
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
                 >
+                  <option value="nvidia-nim">🚀 NVIDIA NIM (DeepSeek V4 Flash / R1 GPU Cloud)</option>
+                  <option value="gemini">⚡ Google Gemini API (2.0 Flash / 1.5 Pro)</option>
                   <option value="built-in-neural">🧠 Built-In Neural Fantasy AI (Fast, Zero-Auth)</option>
-                  <option value="gemini">⚡ Google Gemini API (Live Cloud Reasoning)</option>
                   <option value="local-llm">💻 Local LLM / Ollama (localhost:11434 / LM Studio)</option>
                 </select>
               </div>
+
+              {aiConfig.provider === 'nvidia-nim' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">NVIDIA / DeepSeek Model</label>
+                    <select
+                      value={configModel}
+                      onChange={(e) => setConfigModel(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    >
+                      <option value="deepseek-ai/deepseek-v4-flash-0731">deepseek-ai/deepseek-v4-flash-0731 (High Reasoning CoT)</option>
+                      <option value="deepseek-ai/deepseek-r1">deepseek-ai/deepseek-r1 (DeepSeek R1 Reasoning)</option>
+                      <option value="meta/llama-3.3-70b-instruct">meta/llama-3.3-70b-instruct (Meta 70B)</option>
+                      <option value="nvidia/llama-3.1-nemotron-70b-instruct">nvidia/llama-3.1-nemotron-70b-instruct</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">NVIDIA Base URL</label>
+                    <input
+                      type="text"
+                      value={configEndpoint}
+                      onChange={(e) => setConfigEndpoint(e.target.value)}
+                      placeholder="https://integrate.api.nvidia.com/v1"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-300 font-semibold">NVIDIA API Key (nvapi-...)</label>
+                      <a
+                        href="https://build.nvidia.com/explore/discover"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[10px] text-emerald-400 hover:underline"
+                      >
+                        NVIDIA NIM Portal →
+                      </a>
+                    </div>
+                    <input
+                      type="password"
+                      value={configApiKey}
+                      onChange={(e) => setConfigApiKey(e.target.value)}
+                      placeholder="nvapi-..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Powered by NVIDIA high-performance GPU infrastructure. Stored securely in your browser.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {aiConfig.provider === 'gemini' && (
                 <div className="space-y-3">
@@ -301,7 +365,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-white text-base font-display">Gridiron AI Copilot</h3>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                {aiConfig.provider === 'gemini' ? '⚡ Gemini Cloud AI' : aiConfig.provider === 'local-llm' ? '💻 Local Ollama/LLM' : '🧠 Neural Engine'}
+                {aiConfig.provider === 'nvidia-nim' ? '🚀 NVIDIA DeepSeek' : aiConfig.provider === 'gemini' ? '⚡ Gemini 2.0 Flash' : aiConfig.provider === 'local-llm' ? '💻 Local LLM' : '🧠 Neural Engine'}
               </span>
             </div>
             <p className="text-xs text-slate-400">Calibrated to {settings.name} • 50 yd/pt • 6pt TD</p>

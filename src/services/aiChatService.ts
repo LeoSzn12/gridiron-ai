@@ -3,10 +3,10 @@ import { calculateProjection, comparePlayers } from './aiEngine';
 import { solveOptimalLineup } from './lineupOptimizer';
 
 export interface AIProviderConfig {
-  provider: 'built-in-neural' | 'gemini' | 'local-llm' | 'window-ai';
+  provider: 'built-in-neural' | 'gemini' | 'nvidia-nim' | 'local-llm' | 'window-ai';
   apiKey?: string;
-  localEndpoint?: string; // e.g. http://localhost:11434/v1
-  modelName?: string;     // e.g. gemini-1.5-flash, llama3, mistral
+  localEndpoint?: string; // e.g. https://integrate.api.nvidia.com/v1 or http://localhost:11434/v1
+  modelName?: string;     // e.g. deepseek-ai/deepseek-v4-flash-0731, gemini-2.0-flash, llama3
 }
 
 const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v1';
@@ -19,12 +19,22 @@ export function getSavedAIConfig(): AIProviderConfig {
     // ignore
   }
 
-  // Check if env variable is provided (e.g. from Netlify or .env)
-  const envApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  if (envApiKey) {
+  // Check if NVIDIA or Gemini env variable is provided (e.g. from Netlify or .env)
+  const envNvidiaKey = (import.meta as any).env?.VITE_NVIDIA_API_KEY || '';
+  if (envNvidiaKey) {
+    return {
+      provider: 'nvidia-nim',
+      apiKey: envNvidiaKey,
+      localEndpoint: 'https://integrate.api.nvidia.com/v1',
+      modelName: 'deepseek-ai/deepseek-v4-flash-0731',
+    };
+  }
+
+  const envGeminiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (envGeminiKey) {
     return {
       provider: 'gemini',
-      apiKey: envApiKey,
+      apiKey: envGeminiKey,
       localEndpoint: 'http://localhost:11434/v1',
       modelName: 'gemini-2.0-flash',
     };
@@ -32,8 +42,8 @@ export function getSavedAIConfig(): AIProviderConfig {
 
   return {
     provider: 'built-in-neural',
-    localEndpoint: 'http://localhost:11434/v1',
-    modelName: 'gemini-2.0-flash',
+    localEndpoint: 'https://integrate.api.nvidia.com/v1',
+    modelName: 'deepseek-ai/deepseek-v4-flash-0731',
   };
 }
 
@@ -138,6 +148,65 @@ async function callGeminiAPI(
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('No response returned from Gemini API');
   return text;
+}
+
+/**
+ * Call NVIDIA NIM API / DeepSeek (OpenAI-compatible)
+ */
+async function callNvidiaNimAPI(
+  query: string,
+  players: Player[],
+  settings: LeagueSettings,
+  apiKey: string,
+  modelName: string = 'deepseek-ai/deepseek-v4-flash-0731',
+  baseUrl: string = 'https://integrate.api.nvidia.com/v1',
+  myRoster?: Player[],
+  opponentRoster?: Player[]
+): Promise<{ text: string; reasoning?: string }> {
+  const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
+  const cleanEndpoint = baseUrl.replace(/\/+$/, '');
+  const url = `${cleanEndpoint}/chat/completions`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey.trim()}`,
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: query }
+      ],
+      temperature: 0.7,
+      top_p: 0.95,
+      max_tokens: 4096,
+      chat_template_kwargs: { thinking: true, reasoning_effort: 'high' },
+      extra_body: { chat_template_kwargs: { thinking: true, reasoning_effort: 'high' } },
+      stream: false,
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `NVIDIA NIM API error status: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const choice = data.choices?.[0];
+  const message = choice?.message;
+  const content = message?.content || '';
+  const reasoning = message?.reasoning || message?.reasoning_content || '';
+
+  if (!content && !reasoning) {
+    throw new Error('No content returned from NVIDIA NIM API');
+  }
+
+  return {
+    text: content || reasoning,
+    reasoning: reasoning || undefined,
+  };
 }
 
 /**
@@ -405,12 +474,47 @@ export async function getAIChatResponseAsync(
         text: generatedText,
         timestamp,
         dataBadges: [
-          { label: 'AI Model', value: config.modelName || 'Gemini 1.5 Flash', type: 'positive' },
-          { label: 'Latency', value: 'Live Cloud LLM', type: 'neutral' },
+          { label: 'AI Model', value: config.modelName || 'Gemini 2.0 Flash', type: 'positive' },
+          { label: 'Latency', value: 'Live Google Cloud', type: 'neutral' },
         ],
       };
     } catch (err: any) {
       console.warn('Gemini API call failed, falling back to neural heuristic:', err);
+    }
+  }
+
+  // 2. NVIDIA NIM / DeepSeek Cloud API
+  if (config.provider === 'nvidia-nim' && config.apiKey?.trim()) {
+    try {
+      const baseUrl = config.localEndpoint || 'https://integrate.api.nvidia.com/v1';
+      const result = await callNvidiaNimAPI(
+        query, 
+        players, 
+        settings, 
+        config.apiKey.trim(), 
+        config.modelName || 'deepseek-ai/deepseek-v4-flash-0731', 
+        baseUrl, 
+        myRoster, 
+        opponentRoster
+      );
+      
+      const fullText = result.reasoning
+        ? `> 🧠 **DeepSeek High Reasoning CoT**:\n> ${result.reasoning.split('\n').join('\n> ')}\n\n${result.text}`
+        : result.text;
+
+      return {
+        id: messageId,
+        sender: 'ai',
+        text: fullText,
+        timestamp,
+        dataBadges: [
+          { label: 'AI Model', value: config.modelName?.split('/').pop() || 'DeepSeek Flash', type: 'positive' },
+          { label: 'Infrastructure', value: 'NVIDIA NIM GPU Cloud', type: 'neutral' },
+          ...(result.reasoning ? [{ label: 'Reasoning', value: 'DeepSeek Thinking', type: 'positive' as const }] : []),
+        ],
+      };
+    } catch (err: any) {
+      console.warn('NVIDIA NIM API call failed, falling back to neural heuristic:', err);
     }
   }
 
