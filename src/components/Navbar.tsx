@@ -19,6 +19,9 @@ import {
   BrainCircuit,
   LayoutGrid,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
   Target
 } from 'lucide-react';
 import type { LeagueSettings } from '../types';
@@ -101,6 +104,9 @@ interface NavbarProps {
   allProfiles?: import('../types').LeagueProfile[];
   activeProfile?: import('../types').LeagueProfile;
   onSelectProfile?: (profileId: string) => void;
+  selectedWeek?: number;
+  onSelectWeek?: (week: number) => void;
+  season?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -117,9 +123,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   allProfiles = [],
   activeProfile,
   onSelectProfile,
+  selectedWeek = 1,
+  onSelectWeek,
+  season = '2025',
 }) => {
   const [isMegaMenuOpen, setIsMegaMenuOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
 
   // Flattened tools list for easy lookup
   const allTools = NAVIGATION_CATEGORIES.flatMap(cat => cat.tools);
@@ -239,6 +249,81 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span>Yahoo Sync</span>
                 </button>
               )}
+
+              {/* NFL Week Stepper & Dropdown Selector */}
+              <div className="relative flex items-center bg-slate-900 border border-slate-700 hover:border-emerald-500/60 rounded-2xl p-0.5 shadow-md transition-all">
+                <button
+                  onClick={() => onSelectWeek && onSelectWeek(Math.max(1, selectedWeek - 1))}
+                  disabled={selectedWeek <= 1}
+                  className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Previous Week"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+
+                <div className="relative">
+                  <button
+                    onClick={() => setIsWeekDropdownOpen(!isWeekDropdownOpen)}
+                    className="px-2 py-1 flex items-center gap-1.5 cursor-pointer text-left hover:bg-slate-800/60 rounded-xl transition-colors"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                    <div>
+                      <div className="text-[9px] font-mono text-slate-400 uppercase leading-none font-bold">
+                        {season}
+                      </div>
+                      <div className="text-xs font-mono font-black text-emerald-300 flex items-center gap-1">
+                        <span>WK {selectedWeek}</span>
+                        <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isWeekDropdownOpen ? 'rotate-180' : ''}`} />
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Week Dropdown Menu */}
+                  {isWeekDropdownOpen && (
+                    <div 
+                      className="absolute left-1/2 -translate-x-1/2 top-12 z-50 w-52 rounded-2xl bg-slate-950 border border-emerald-500/30 shadow-2xl p-2.5 space-y-1.5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-2 py-1 text-[10px] font-mono font-bold uppercase text-slate-400 border-b border-slate-800 flex items-center justify-between">
+                        <span>Select NFL Week</span>
+                        <span className="text-emerald-400 font-bold">18 Weeks</span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1 pt-1 max-h-48 overflow-y-auto">
+                        {Array.from({ length: 18 }).map((_, idx) => {
+                          const w = idx + 1;
+                          const isCurrent = selectedWeek === w;
+                          return (
+                            <button
+                              key={w}
+                              onClick={() => {
+                                if (onSelectWeek) onSelectWeek(w);
+                                setIsWeekDropdownOpen(false);
+                              }}
+                              className={`py-1.5 px-1 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${
+                                isCurrent 
+                                  ? 'bg-emerald-500 text-slate-950 shadow-md font-black' 
+                                  : 'hover:bg-slate-900 text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              W{w}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => onSelectWeek && onSelectWeek(Math.min(18, selectedWeek + 1))}
+                  disabled={selectedWeek >= 18}
+                  className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="Next Week"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
               {/* League Profile Selector Dropdown */}
               <div className="relative">

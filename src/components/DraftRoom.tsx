@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { Player, LeagueSettings, DraftPick, PlayerPosition } from '../types';
-import { calculateProjection } from '../services/aiEngine';
+import { calculateProjection, calculatePositionBaselines } from '../services/aiEngine';
 import { 
   Trophy, 
   RotateCcw, 
@@ -81,21 +81,59 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
 
   const draftedPlayerIds = useMemo(() => new Set(draftedPicks.map(p => p.player.id)), [draftedPicks]);
 
-  // Available Players with live VORP calculation
-  const availablePlayers = useMemo(() => {
-    return players
-      .filter(p => !draftedPlayerIds.has(p.id))
-      .map(p => ({
-        player: p,
-        proj: calculateProjection(p, settings),
-      }))
-      .sort((a, b) => b.proj.vorpValue - a.proj.vorpValue || b.proj.projectedPoints - a.proj.projectedPoints);
-  }, [players, draftedPlayerIds, settings]);
+  // True replacement baselines calculated dynamically from the active player pool
+  const positionBaselines = useMemo(() => {
+    return calculatePositionBaselines(players, settings);
+  }, [players, settings]);
 
   const currentPickIndex = draftedPicks.length; // 0-based
   const currentRound = Math.floor(currentPickIndex / settings.numTeams) + 1;
   const pickInRound = (currentPickIndex % settings.numTeams) + 1;
-  
+
+  // Available Players with live VORP calculation and positional draft priority
+  const availablePlayers = useMemo(() => {
+    const hasTackleScoring = (settings.idp.soloTackle || 0) > 0 || (settings.idp.assistedTackle || 0) > 0;
+    
+    return players
+      .filter(p => !draftedPlayerIds.has(p.id))
+      .map(p => {
+        const proj = calculateProjection(p, settings, positionBaselines);
+        
+        // Positional draft priority score:
+        // In 3-QB formats, starting 24 QBs creates extreme positional scarcity.
+        // DEF, K, and 0-tackle IDPs are late-round dart throws and must never be drafted early.
+        let draftPriorityScore = proj.vorpValue;
+        if (p.position === 'QB') {
+          if (settings.roster.qb >= 3) draftPriorityScore *= 1.35;
+          else if (settings.roster.qb >= 2) draftPriorityScore *= 1.2;
+        } else if (p.position === 'RB') {
+          if (settings.roster.rb >= 3) draftPriorityScore *= 1.15;
+        } else if (p.position === 'WR') {
+          if (settings.roster.wr >= 5) draftPriorityScore *= 1.15;
+        } else if (p.position === 'DEF' || p.position === 'K') {
+          draftPriorityScore *= currentRound < 14 ? 0.15 : 0.45;
+        } else if (p.position === 'DL' || p.position === 'LB' || p.position === 'DB') {
+          if (!hasTackleScoring) {
+            draftPriorityScore *= 0.2; // In 0-tackle leagues, IDPs are low-impact dart throws
+          } else {
+            draftPriorityScore *= currentRound < 8 ? 0.4 : 0.8;
+          }
+        }
+
+        return {
+          player: p,
+          proj,
+          draftPriorityScore,
+        };
+      })
+      .sort((a, b) => {
+        if (positionFilter !== 'ALL') {
+          return b.proj.vorpValue - a.proj.vorpValue || b.proj.projectedPoints - a.proj.projectedPoints;
+        }
+        return b.draftPriorityScore - a.draftPriorityScore || b.proj.vorpValue - a.proj.vorpValue || b.proj.projectedPoints - a.proj.projectedPoints;
+      });
+  }, [players, draftedPlayerIds, settings, positionBaselines, currentRound, positionFilter]);
+
   // Snake Draft team determination
   const currentTeamIndex = useMemo(() => {
     if (currentPickIndex >= totalRounds * settings.numTeams) return 0;
@@ -108,26 +146,18 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
   const isUserOnTheClock = currentTeam.isUser && currentPickIndex < totalRounds * settings.numTeams;
   const isDraftFinished = currentPickIndex >= totalRounds * settings.numTeams;
 
-  // AI Recommended Pick for team on clock — respects position draft timing conventions
+  // AI Recommended Pick for team on clock — directly selects #1 player on calibrated draft board
   const aiRecommendedPlayer = useMemo(() => {
     if (availablePlayers.length === 0) return null;
-    const round = currentRound;
-    // Filter out positions that should never be drafted early:
-    // DEF/K: not before round 12; IDP: not before round 8 (unless very late in draft)
-    const earlyRoundEligible = availablePlayers.filter(({ player: p }) => {
-      if (p.position === 'DEF' || p.position === 'K') return round >= 12;
-      if (p.position === 'DL' || p.position === 'LB' || p.position === 'DB') return round >= 8;
-      return true;
-    });
-    return (earlyRoundEligible[0] || availablePlayers[0]).player;
-  }, [availablePlayers, currentRound]);
+    return availablePlayers[0].player;
+  }, [availablePlayers]);
 
   // Core Draft Action
   const handleDraftPlayer = (player: Player) => {
     if (isDraftFinished || draftedPlayerIds.has(player.id)) return;
 
     const pickNum = currentPickIndex + 1;
-    const proj = calculateProjection(player, settings);
+    const proj = calculateProjection(player, settings, positionBaselines);
     const aiGrade: 'A+' | 'A' | 'B+' | 'B' | 'C+' = proj.vorpValue >= 10 ? 'A+' : proj.vorpValue >= 5 ? 'A' : proj.vorpValue >= 0 ? 'B+' : 'B';
     const aiAnalysis = `Selected ${player.name} (${player.position} - ${player.team}) with +${proj.vorpValue} VORP rating in ${settings.name}.`;
 
@@ -189,10 +219,10 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
 
   const userProjectedWeeklyScore = useMemo(() => {
     return userDraftedRoster.reduce((sum, p) => {
-      const proj = calculateProjection(p, settings);
+      const proj = calculateProjection(p, settings, positionBaselines);
       return sum + proj.projectedPoints;
     }, 0);
-  }, [userDraftedRoster, settings]);
+  }, [userDraftedRoster, settings, positionBaselines]);
 
   // Dynamic Roster Slots Breakdown
   const rosterSlotGroups = useMemo(() => {
@@ -338,7 +368,7 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
                   <div className="text-sm sm:text-base font-extrabold text-white font-display mt-0.5 flex items-center gap-2">
                     <span>{aiRecommendedPlayer.name}</span>
                     <span className="text-xs font-mono font-bold text-emerald-400">
-                      (+{calculateProjection(aiRecommendedPlayer, settings).vorpValue} VORP)
+                      (+{calculateProjection(aiRecommendedPlayer, settings, positionBaselines).vorpValue} VORP)
                     </span>
                   </div>
                 </div>
@@ -392,7 +422,7 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
                   <th className="p-3.5">Pos</th>
                   <th className="p-3.5">VORP</th>
                   <th className="p-3.5">Weekly Proj</th>
-                  <th className="p-3.5">Implied Pts</th>
+                  <th className="p-3.5">Vegas Props</th>
                   <th className="p-3.5 text-right">Draft</th>
                 </tr>
               </thead>
@@ -441,7 +471,8 @@ export const DraftRoom: React.FC<DraftRoomProps> = ({
                       </td>
 
                       <td className="p-3.5 text-slate-300">
-                        {player.vegas.impliedTeamTotal} pts
+                        <div className="font-bold text-slate-200">{proj.vegasImpliedFantasyPoints} pts</div>
+                        <div className="text-[10px] text-slate-500 font-normal">Team O/U: {player.vegas.impliedTeamTotal}</div>
                       </td>
 
                       <td className="p-3.5 text-right">

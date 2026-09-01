@@ -17,12 +17,14 @@ interface PlayerModalProps {
   player: Player | null;
   onClose: () => void;
   settings: LeagueSettings;
+  selectedWeek?: number;
 }
 
 export const PlayerModal: React.FC<PlayerModalProps> = ({
   player,
   onClose,
   settings,
+  selectedWeek = 1,
 }) => {
   if (!player) return null;
 
@@ -74,7 +76,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
             </h2>
 
             <div className="text-xs text-slate-300 flex items-center gap-2">
-              <span>Week Matchup: <strong className="text-emerald-400">vs {player.opponent}</strong> ({player.isHome ? 'Home' : 'Away'})</span>
+              <span>Week {selectedWeek} Matchup: <strong className="text-emerald-400">vs {player.opponent}</strong> ({player.isHome ? 'Home' : 'Away'})</span>
               <span>•</span>
               <span>Rostered: <strong className="text-white">{player.rosterPct}%</strong></span>
             </div>
@@ -82,7 +84,7 @@ export const PlayerModal: React.FC<PlayerModalProps> = ({
 
           {/* AI Verdict Badge */}
           <div className="text-right bg-slate-950/70 p-4 rounded-2xl border border-slate-800">
-            <div className="text-[10px] font-mono uppercase text-slate-400">AI PROJECTION ({settings.name})</div>
+            <div className="text-[10px] font-mono uppercase text-slate-400">WEEK {selectedWeek} AI PROJECTION ({settings.name})</div>
             <div className="text-3xl font-black font-mono text-emerald-400">{proj.projectedPoints} <span className="text-xs text-slate-400 font-sans font-normal">pts</span></div>
 
             <span className={`inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold font-mono uppercase mt-1 ${

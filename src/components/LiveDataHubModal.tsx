@@ -38,6 +38,8 @@ interface LiveDataHubModalProps {
   onUpdatePlayers: (updatedPlayers: Player[]) => void;
   onUpdateLeagueSettings?: (settings: LeagueSettings) => void;
   onUpdateRosterIds?: (myIds: string[], oppIds: string[], userTeamName: string, oppTeamName: string) => void;
+  selectedWeek?: number;
+  onSelectWeek?: (week: number) => void;
 }
 
 export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
@@ -48,6 +50,8 @@ export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
   onUpdatePlayers,
   onUpdateLeagueSettings,
   onUpdateRosterIds,
+  selectedWeek = 1,
+  onSelectWeek,
 }) => {
   const [activeTab, setActiveTab] = useState<'sleeper' | 'espn' | 'telemetry'>('sleeper');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -195,7 +199,25 @@ export const LiveDataHubModal: React.FC<LiveDataHubModalProps> = ({
               <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
               LIVE DATA PIPELINE HUB
             </span>
-            <span className="text-xs text-slate-400 font-mono">NFL Season {nflState.season} • Week {nflState.week}</span>
+            <span className="text-xs text-slate-400 font-mono">NFL Season {nflState.season} • Active Week {selectedWeek}</span>
+            {onSelectWeek && (
+              <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-0.5 ml-2">
+                <span className="text-[10px] font-mono text-slate-400 font-bold">Week:</span>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(w => (
+                  <button
+                    key={w}
+                    onClick={() => onSelectWeek(w)}
+                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold cursor-pointer transition-all ${
+                      selectedWeek === w
+                        ? 'bg-emerald-500 text-slate-950 font-black'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    W{w}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <h2 className="text-2xl font-bold text-white font-display mt-1">Live NFL Data & League Sync Diagnostics</h2>

@@ -1,5 +1,6 @@
 import type { 
   Player, 
+  PlayerPosition,
   LeagueSettings, 
   AIProjection, 
   StartSitComparisonResult, 
@@ -26,9 +27,42 @@ export function oddsToProbability(oddsStr: string): number {
   }
 }
 
+// Calculate standard benchmark fantasy points (25 pass yds/pt, 4 pt TD, 10 rush/rec yds/pt, 1 PPR, 1.5 pt tackle)
+export function calculateStandardBenchmarkPoints(player: Player): number {
+  const anyTimeTDProb = oddsToProbability(player.vegas.props.anytimeTDOdds);
+
+  if (player.position === 'QB') {
+    const passYds = player.vegas.props.passingYardsOU || 235;
+    const passTDs = player.vegas.props.passingTDsOU || 1.7;
+    const rushYds = player.vegas.props.rushingYardsOU || 20;
+    return (passYds / 25) + (passTDs * 4) + (rushYds / 10) + (anyTimeTDProb * 6) - (0.7 * 2);
+  } else if (player.position === 'RB') {
+    const rushYds = player.vegas.props.rushingYardsOU || 65;
+    const recYds = player.vegas.props.receivingYardsOU || 18;
+    const recs = player.vegas.props.receptionsOU || 2.5;
+    return (rushYds / 10) + (recYds / 10) + (recs * 1.0) + (anyTimeTDProb * 6) - 0.3;
+  } else if (player.position === 'WR' || player.position === 'TE') {
+    const recYds = player.vegas.props.receivingYardsOU || 60;
+    const recs = player.vegas.props.receptionsOU || 4.5;
+    return (recYds / 10) + (recs * 1.0) + (anyTimeTDProb * 6);
+  } else if (player.position === 'DL' || player.position === 'LB' || player.position === 'DB') {
+    const tackles = player.stats.tacklesPerGame ?? (player.position === 'LB' ? 8.5 : 6.0);
+    const sacks = player.stats.sacksPerGame ?? (player.position === 'DL' ? 0.9 : player.position === 'LB' ? 0.4 : 0.1);
+    const ints = player.stats.interceptionsPerGame ?? (player.position === 'DB' ? 0.4 : 0.2);
+    const ff = player.stats.fumbleForcesPerGame ?? 0.2;
+    return (tackles * 1.5) + (sacks * 2.0) + (ints * 3.0) + (ff * 2.0);
+  } else if (player.position === 'K') {
+    return 7.5;
+  } else if (player.position === 'DEF') {
+    return 7.0;
+  }
+  return 10.0;
+}
+
 export function calculateProjection(
   player: Player,
-  settings: LeagueSettings = LEO_SZN_YAHOO_PRESET
+  settings: LeagueSettings = LEO_SZN_YAHOO_PRESET,
+  customBaselines?: Partial<Record<PlayerPosition, number>>
 ): AIProjection {
   let vegasPoints = 0;
   const anyTimeTDProb = oddsToProbability(player.vegas.props.anytimeTDOdds);
@@ -67,23 +101,25 @@ export function calculateProjection(
 
     vegasPoints = recYdsPts + pprPts + tdPts;
   } else if (player.position === 'DL' || player.position === 'LB' || player.position === 'DB') {
-    const tackles = player.stats.tacklesPerGame || 6.5;
-    const sacks = player.stats.sacksPerGame || 0.8;
-    const ints = player.stats.interceptionsPerGame || 0.1;
-    const ff = player.stats.fumbleForcesPerGame || 0.1;
+    const tackles = player.stats.tacklesPerGame ?? (player.position === 'LB' ? 8.5 : 6.0);
+    const sacks = player.stats.sacksPerGame ?? (player.position === 'DL' ? 0.9 : player.position === 'LB' ? 0.4 : 0.1);
+    const ints = player.stats.interceptionsPerGame ?? (player.position === 'DB' ? 0.4 : 0.2);
+    const ff = player.stats.fumbleForcesPerGame ?? 0.2;
 
-    vegasPoints = (tackles * settings.idp.soloTackle) + 
-                  (sacks * settings.idp.sack) + 
-                  (ints * settings.idp.interception) + 
-                  (ff * settings.idp.fumbleForce);
+    vegasPoints = (tackles * (settings.idp.soloTackle ?? 0)) + 
+                  (sacks * (settings.idp.sack ?? 2)) + 
+                  (ints * (settings.idp.interception ?? 2)) + 
+                  (ff * (settings.idp.fumbleForce ?? 2)) +
+                  ((settings.idp.passDefended ?? 0) * ints * 2) +
+                  ((settings.idp.tackleForLoss ?? 0) * (sacks * 0.8));
   } else if (player.position === 'K') {
     const teamTotal = player.vegas.impliedTeamTotal;
     const domeBonus = player.weather.isDome ? 1.5 : 0;
-    vegasPoints = Math.max(4, (teamTotal / 3.2) * (settings.kicker.fg40_49 / 4) + domeBonus);
+    vegasPoints = Math.max(3, (teamTotal / 3.2) * (settings.kicker.fg40_49 / 4) + domeBonus);
   } else if (player.position === 'DEF') {
     const oppTotal = player.vegas.opponentImpliedTotal;
     const ptsAllowedScore = oppTotal <= 6 ? settings.defTeam.ptsAllowed1_6 : oppTotal <= 13 ? settings.defTeam.ptsAllowed7_13 : oppTotal <= 20 ? settings.defTeam.ptsAllowed14_20 : settings.defTeam.ptsAllowed21_27;
-    vegasPoints = Math.max(3, ptsAllowedScore + (player.defense.pressureRatePct * 0.12 * (settings.defTeam.sack / 2)));
+    vegasPoints = Math.max(2, ptsAllowedScore + (player.defense.pressureRatePct * 0.12 * (settings.defTeam.sack / 2)));
   }
 
   // 2. Matchup & DvP Factor
@@ -112,17 +148,19 @@ export function calculateProjection(
   const proeBonus = (player.coaching.proe / 100) * (player.position === 'WR' || player.position === 'QB' || player.position === 'TE' ? 0.8 : -0.5);
   const schemeMultiplier = 1 + paceBonus + proeBonus;
 
-  // 5. Volume Base
-  const usageBase = player.stats.recentAveragePoints;
+  // 5. Volume Base (Scaled to active league scoring format)
+  const standardBase = calculateStandardBenchmarkPoints(player);
+  const scoringScaleRatio = standardBase > 0 ? (vegasPoints / standardBase) : 1.0;
+  const usageBase = (player.stats.recentAveragePoints || standardBase) * scoringScaleRatio;
 
   // Weighted synthesis
-  const rawProjected = (vegasPoints * 0.45) + (usageBase * 0.35 * matchupMultiplier * weatherMultiplier * schemeMultiplier) + (vegasPoints * (matchupMultiplier - 1) * 0.20);
+  const rawProjected = (vegasPoints * 0.50) + (usageBase * 0.45 * matchupMultiplier * weatherMultiplier * schemeMultiplier) + (vegasPoints * (matchupMultiplier - 1) * 0.05);
   
-  const projectedPoints = Number(Math.max(1.5, rawProjected).toFixed(1));
+  const projectedPoints = Number(Math.max(0.5, rawProjected).toFixed(1));
 
   // Volatility, Floor & Ceiling
   const volatility = player.position === 'WR' ? 0.36 : player.position === 'QB' ? 0.22 : player.position === 'RB' ? 0.26 : player.position === 'DL' || player.position === 'LB' || player.position === 'DB' ? 0.28 : 0.38;
-  const floor = Number(Math.max(0.5, projectedPoints * (1 - volatility)).toFixed(1));
+  const floor = Number(Math.max(0.2, projectedPoints * (1 - volatility)).toFixed(1));
   const ceiling = Number((projectedPoints * (1 + volatility * 1.5)).toFixed(1));
 
   const boomProbability = Math.min(95, Math.max(5, Math.round(((ceiling - 18) / 16) * 100)));
@@ -145,17 +183,36 @@ export function calculateProjection(
 
   const startConfidence = Math.min(99, Math.max(10, compositeScore));
 
-  // VORP Baseline — position-adjusted, league-format aware
-  // Higher baseline = harder to generate VORP = drafted later (correct behavior for DEF/K)
-  const replacementBaseline = 
-    player.position === 'QB' ? (settings.roster.qb >= 3 ? 12.0 : 18.0) :  // 3-QB league: QBs are scarce, high baseline
-    player.position === 'RB' ? (settings.roster.rb >= 3 ? 8.5 : 11.0) :
-    player.position === 'WR' ? (settings.roster.wr >= 5 ? 7.0 : 9.5) :
-    player.position === 'TE' ? (settings.roster.te >= 2 ? 5.5 : 7.5) :
-    player.position === 'DEF' ? 8.0 :    // Waiver DEF averages ~8 pts — DEF drafted last
-    player.position === 'K'   ? 7.0 :    // Waiver K averages ~7 pts — drafted very late
-    player.position === 'DL' || player.position === 'LB' || player.position === 'DB' ? 4.0 : 3.5;
+  // VORP Baseline — dynamically league-format and roster-depth aware
+  const numTeams = settings.numTeams || 8;
+  const qbStarters = numTeams * (settings.roster.qb || 1);
+  const wrStarters = numTeams * (settings.roster.wr || 2);
+  const rbStarters = numTeams * (settings.roster.rb || 2);
+  const teStarters = numTeams * (settings.roster.te || 1);
+  const hasIdpTackles = (settings.idp.soloTackle || 0) > 0 || (settings.idp.assistedTackle || 0) > 0;
   
+  const passScale = (25 / (settings.offense.passYardsPerPoint || 25)) * ((settings.offense.passTouchdown || 4) / 4);
+  const rushScale = (10 / (settings.offense.rushYardsPerPoint || 10));
+  const recScale = ((10 / (settings.offense.recYardsPerPoint || 10)) * 0.6) + ((settings.offense.receptionsPPR || 0) * 0.4);
+
+  const fallbackBaseline = 
+    player.position === 'QB' 
+      ? (qbStarters >= 24 ? 8.2 * passScale : qbStarters >= 16 ? 11.0 * passScale : 14.5 * passScale)
+      : player.position === 'RB'
+      ? (rbStarters >= 24 ? 4.8 * rushScale : 6.5 * rushScale)
+      : player.position === 'WR'
+      ? (wrStarters >= 36 ? 3.6 * recScale : wrStarters >= 24 ? 5.2 * recScale : 7.2 * recScale)
+      : player.position === 'TE'
+      ? (teStarters >= 16 ? 2.5 * recScale : 4.5 * recScale)
+      : player.position === 'DEF'
+      ? 5.0
+      : player.position === 'K'
+      ? 5.0
+      : player.position === 'DL' || player.position === 'LB' || player.position === 'DB'
+      ? (hasIdpTackles ? 9.5 : 1.1)
+      : 3.5;
+
+  const replacementBaseline = customBaselines?.[player.position] ?? Number(fallbackBaseline.toFixed(1));
   const vorpValue = Number((projectedPoints - replacementBaseline).toFixed(1));
 
   const tier = projectedPoints >= 22 ? 1 : projectedPoints >= 16 ? 2 : projectedPoints >= 12 ? 3 : projectedPoints >= 8 ? 4 : 5;
@@ -238,6 +295,57 @@ export function calculateProjection(
     aiRecommendation,
     vegasImpliedFantasyPoints: Number(vegasPoints.toFixed(1)),
   };
+}
+
+/**
+ * Calculates dynamic replacement baselines for each position using the active player pool
+ * and league settings (evaluating starters needed: numTeams * rosterSlots).
+ */
+export function calculatePositionBaselines(
+  players: Player[],
+  settings: LeagueSettings
+): Record<PlayerPosition, number> {
+  const positions: PlayerPosition[] = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB'];
+  const baselines: Record<PlayerPosition, number> = {
+    QB: 10.0, RB: 6.0, WR: 5.0, TE: 3.5, K: 5.5, DEF: 5.0, DL: 1.5, LB: 1.5, DB: 1.5
+  };
+
+  const numTeams = settings.numTeams || 8;
+  const rosterSlotMap: Record<PlayerPosition, number> = {
+    QB: settings.roster.qb || 1,
+    RB: settings.roster.rb || 2,
+    WR: settings.roster.wr || 2,
+    TE: settings.roster.te || 1,
+    K: settings.roster.k || 1,
+    DEF: settings.roster.def || 1,
+    DL: settings.roster.dl || 0,
+    LB: settings.roster.lb || 0,
+    DB: settings.roster.db || 0,
+  };
+
+  positions.forEach(pos => {
+    const slots = rosterSlotMap[pos];
+    if (slots <= 0) {
+      baselines[pos] = 0;
+      return;
+    }
+
+    const posPlayers = players.filter(p => p.position === pos);
+    if (posPlayers.length === 0) return;
+
+    // Calculate raw projected points for all players at this position
+    const projs = posPlayers.map(p => {
+      const proj = calculateProjection(p, settings);
+      return proj.projectedPoints;
+    }).sort((a, b) => b - a);
+
+    const totalStarters = numTeams * slots;
+    // The replacement player is the first player after the starters cutoff (or the bottom starter)
+    const replacementIndex = Math.min(totalStarters - 1, projs.length - 1);
+    baselines[pos] = projs[replacementIndex] ?? projs[projs.length - 1];
+  });
+
+  return baselines;
 }
 
 export function comparePlayers(

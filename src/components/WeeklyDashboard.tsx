@@ -35,6 +35,8 @@ interface WeeklyDashboardProps {
   onOpenAudioBriefing: () => void;
   userTeamName?: string;
   opponentTeamName?: string;
+  selectedWeek?: number;
+  onSelectWeek?: (week: number) => void;
 }
 
 export const WeeklyDashboard: React.FC<WeeklyDashboardProps> = ({
@@ -49,6 +51,8 @@ export const WeeklyDashboard: React.FC<WeeklyDashboardProps> = ({
   onOpenAudioBriefing,
   userTeamName = 'Leo Szn',
   opponentTeamName = 'Opponent Team',
+  selectedWeek = 1,
+  onSelectWeek,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'lineup' | 'matchup' | 'insights'>('lineup');
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
@@ -110,7 +114,7 @@ export const WeeklyDashboard: React.FC<WeeklyDashboardProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                SUNDAY MORNING HQ • GAMEDAY COMMAND CENTER
+                SUNDAY MORNING HQ • WEEK {selectedWeek} GAMEDAY COMMAND CENTER
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono bg-slate-800/80 text-slate-300 border border-slate-700">
                 {settings.name}
@@ -118,6 +122,26 @@ export const WeeklyDashboard: React.FC<WeeklyDashboardProps> = ({
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
                 Grade: {rosterReport.overallGrade}
               </span>
+
+              {onSelectWeek && (
+                <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl px-2 py-0.5">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase font-bold mr-1">Week:</span>
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map(w => (
+                    <button
+                      key={w}
+                      onClick={() => onSelectWeek(w)}
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold cursor-pointer transition-all ${
+                        selectedWeek === w
+                          ? 'bg-emerald-500 text-slate-950 font-black'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      W{w}
+                    </button>
+                  ))}
+                  <span className="text-slate-600 text-[10px]">...</span>
+                </div>
+              )}
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-extrabold text-white font-display tracking-tight">

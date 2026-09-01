@@ -97,11 +97,13 @@ export function App() {
   const [leagueSettings, setLeagueSettings] = useState<LeagueSettings>(activeProfile.settings);
   const [myRosterIds, setMyRosterIds] = useState<string[]>(activeProfile.myRosterIds);
   const [opponentRosterIds, setOpponentRosterIds] = useState<string[]>(activeProfile.opponentRosterIds);
+  const [selectedWeek, setSelectedWeek] = useState<number>(1);
+  const [nflSeason, setNflSeason] = useState<string>('2025');
   const [rosterMeta, setRosterMeta] = useState<RosterMetadata>({
     userTeamName: activeProfile.userTeamName,
     opponentTeamName: activeProfile.opponentTeamName,
     leagueId: activeProfile.id,
-    season: '2024',
+    season: '2025',
     week: 1,
   });
 
@@ -209,6 +211,8 @@ export function App() {
       const week = nflState.week || 1;
 
       if (isMounted) {
+        setNflSeason(season);
+        setSelectedWeek(week);
         setRosterMeta(prev => ({ ...prev, season, week }));
       }
 
@@ -243,6 +247,22 @@ export function App() {
       clearInterval(scoreRefresh);
     };
   }, []); // runs once on mount — leagueSettings dependency removed to avoid re-fetching 3000 players on every settings change
+
+  // User week switcher handler: fetches and updates live projections & stats for target week
+  const handleSelectWeek = async (newWeek: number) => {
+    if (newWeek === selectedWeek && !isLiveDataLoading) return;
+    setSelectedWeek(newWeek);
+    setRosterMeta(prev => ({ ...prev, week: newWeek }));
+    setIsLiveDataLoading(true);
+    try {
+      const updatedPlayers = await buildLivePlayersDatabase(PLAYERS_DATABASE, nflSeason, newWeek);
+      setPlayersList(updatedPlayers);
+    } catch (err) {
+      console.warn(`Failed to load projections for week ${newWeek}:`, err);
+    } finally {
+      setIsLiveDataLoading(false);
+    }
+  };
 
   // Auto-sync Yahoo roster if connected
   useEffect(() => {
@@ -449,13 +469,13 @@ export function App() {
       
       {/* Live Data Loading Banner */}
       {isLiveDataLoading && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-emerald-950/95 border-b border-emerald-500/30 px-4 py-2 flex items-center justify-center gap-3 text-xs font-mono backdrop-blur-sm">
+        <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-emerald-950/95 border-b border-emerald-500/30 px-4 py-2 flex items-center justify-center gap-3 text-xs font-mono backdrop-blur-sm shadow-xl">
           <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-          <span className="text-emerald-300">Loading live NFL player data from Sleeper API + ESPN odds + Open-Meteo weather...</span>
+          <span className="text-emerald-300">Loading live NFL player data for Season {nflSeason} Week {selectedWeek} from Sleeper API + ESPN odds...</span>
         </div>
       )}
 
-      {/* Navigation Header with Live ESPN Week 1 Scoreboard */}
+      {/* Navigation Header with Live ESPN Scoreboard & Week Selector */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -471,6 +491,9 @@ export function App() {
         allProfiles={allProfiles}
         activeProfile={activeProfile}
         onSelectProfile={handleSelectProfile}
+        selectedWeek={selectedWeek}
+        onSelectWeek={handleSelectWeek}
+        season={nflSeason}
       />
 
       {/* Main Content Area */}
@@ -538,6 +561,8 @@ export function App() {
             onOpenAudioBriefing={() => setActiveTab('audio')}
             userTeamName={rosterMeta.userTeamName}
             opponentTeamName={rosterMeta.opponentTeamName}
+            selectedWeek={selectedWeek}
+            onSelectWeek={handleSelectWeek}
           />
         )}
 
@@ -708,6 +733,7 @@ export function App() {
         player={selectedPlayerDetail}
         onClose={() => setSelectedPlayerDetail(null)}
         settings={leagueSettings}
+        selectedWeek={selectedWeek}
       />
 
       {/* Custom League Settings & Scoring Modal */}
@@ -727,6 +753,8 @@ export function App() {
         onUpdatePlayers={(updated) => setPlayersList(updated)}
         onUpdateLeagueSettings={(newSettings) => setLeagueSettings(newSettings)}
         onUpdateRosterIds={handleUpdateRosters}
+        selectedWeek={selectedWeek}
+        onSelectWeek={handleSelectWeek}
       />
 
       {/* Yahoo Fantasy Connect & Fast-Paste Importer Modal */}
