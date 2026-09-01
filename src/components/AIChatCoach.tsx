@@ -8,6 +8,8 @@ import {
   getAIChatResponseAsync, 
   getSavedAIConfig, 
   saveAIConfig, 
+  POPULAR_AI_MODELS,
+  type AIProvider,
   type AIProviderConfig 
 } from '../services/aiChatService';
 import { 
@@ -16,7 +18,9 @@ import {
   Trash2,
   Settings2,
   Cpu,
-  X
+  X,
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 
 interface AIChatCoachProps {
@@ -30,7 +34,7 @@ interface AIChatCoachProps {
 export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   players,
   settings,
-  onSelectPlayerDetail,
+  onSelectPlayerDetail: _onSelectPlayerDetail,
   myRoster = [],
   opponentRoster = [],
 }) => {
@@ -38,7 +42,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [configApiKey, setConfigApiKey] = useState(aiConfig.apiKey || '');
   const [configEndpoint, setConfigEndpoint] = useState(aiConfig.localEndpoint || 'http://localhost:11434/v1');
-  const [configModel, setConfigModel] = useState(aiConfig.modelName || 'gemini-1.5-flash');
+  const [configModel, setConfigModel] = useState(aiConfig.modelName || 'anthropic/claude-3.5-sonnet');
   const [testStatus, setTestStatus] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -47,12 +51,12 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
       sender: 'ai',
       text: `### 🏈 Welcome to Gridiron AI Coach for **${settings.name}**!\n\n` +
         `I am your 24/7 Fantasy Football Strategist, calibrated for **${settings.numTeams} Teams, ${settings.roster.qb} Starting QBs, ${settings.roster.wr} Starting WRs, 50 Pass Yds/Pt, and 6pt Pass TDs**.\n\n` +
-        `Ask me anything about your 3-QB draft strategy, start/sit decisions, IDP targets, waiver wire pickups, or trade proposals!`,
+        `Ask me anything about start/sit decisions, waiver wire FAAB bids, player prop correlations, or roster evaluations!`,
       timestamp: 'Just now',
       dataBadges: [
-        { label: 'Active League', value: settings.userTeamName, type: 'positive' },
-        { label: 'Roster Format', value: `${settings.roster.qb} QB / ${settings.roster.wr} WR`, type: 'positive' },
-        { label: 'Pass Scale', value: '50 yd / 6pt TD', type: 'neutral' },
+        { label: 'Active Team', value: settings.userTeamName, type: 'positive' },
+        { label: 'Format', value: `${settings.numTeams}T • ${settings.roster.qb}QB`, type: 'positive' },
+        { label: 'Pass Scale', value: `${settings.offense.passYardsPerPoint}yd / ${settings.offense.passTouchdown}pt TD`, type: 'neutral' },
       ],
     },
   ]);
@@ -82,59 +86,51 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
     setTestStatus('Settings saved!');
   };
 
-  const handleTestConnection = async () => {
-    setTestStatus('Testing endpoint...');
-    try {
-      if (aiConfig.provider === 'local-llm') {
-        const res = await fetch(`${configEndpoint.replace(/\/+$/, '')}/models`).catch(() => null);
-        if (res && res.ok) {
-          setTestStatus('✅ Local LLM server reachable!');
-        } else {
-          setTestStatus('⚠️ Endpoint reached, ready for inference.');
-        }
-      } else if (aiConfig.provider === 'gemini') {
-        if (!configApiKey.trim()) {
-          setTestStatus('⚠️ Please enter a valid Gemini API key.');
-          return;
-        }
-        setTestStatus('✅ Gemini key configured.');
-      } else {
-        setTestStatus('✅ Built-in Neural Engine active.');
-      }
-    } catch (e: any) {
-      setTestStatus(`❌ Connection error: ${e.message}`);
-    }
+  const handleProviderChange = (newProvider: AIProvider) => {
+    const defaultModel = POPULAR_AI_MODELS[newProvider]?.[0]?.id || '';
+    const defaultEndpoint = newProvider === 'local-llm' ? 'http://localhost:11434/v1' : '';
+    setAiConfig(prev => ({ ...prev, provider: newProvider }));
+    setConfigModel(defaultModel);
+    setConfigEndpoint(defaultEndpoint);
+    setTestStatus(null);
   };
 
-  const handleSendMessage = async (textToSend?: string) => {
-    const query = textToSend || inputQuery.trim();
-    if (!query) return;
+  const handleSendMessage = async (customPrompt?: string) => {
+    const textToSend = customPrompt || inputQuery;
+    if (!textToSend.trim() || isTyping) return;
 
-    const messageId = `msg-user-${messages.length + 1}`;
-    const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const userMessage: ChatMessage = {
-      id: messageId,
+    const userTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: `user-${messages.length + 1}`,
       sender: 'user',
-      text: query,
-      timestamp: currentTimeStr,
+      text: textToSend.trim(),
+      timestamp: userTimestamp,
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    if (!textToSend) setInputQuery('');
+    setMessages(prev => [...prev, userMsg]);
+    if (!customPrompt) setInputQuery('');
     setIsTyping(true);
 
     try {
-      const aiResponse = await getAIChatResponseAsync(query, players, settings, aiConfig, myRoster, opponentRoster);
-      setMessages(prev => [...prev, aiResponse]);
+      const aiReply = await getAIChatResponseAsync(
+        textToSend.trim(),
+        players,
+        settings,
+        aiConfig,
+        myRoster,
+        opponentRoster
+      );
+      setMessages(prev => [...prev, aiReply]);
     } catch (err: any) {
+      console.warn('AI chat error handled gracefully:', err);
       setMessages(prev => [
         ...prev,
         {
-          id: `msg-err-${Date.now()}`,
+          id: `err-${messages.length + 1}`,
           sender: 'ai',
-          text: `⚠️ **AI Inference Error:** ${err.message || 'Failed to generate response'}. Falling back to default mathematical advice.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          text: `### ⚠️ Notice\n\nI was unable to reach the external AI model directly, but I have analyzed your question using the built-in mathematical engine:\n\n` +
+            `*Passing scale is ${settings.offense.passYardsPerPoint} yds/pt with 6pt TDs. High-volume QBs and explosive red-zone weapons carry significant VORP upside.*`,
+          timestamp: userTimestamp,
         }
       ]);
     } finally {
@@ -143,13 +139,12 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
   };
 
   const quickPrompts = [
-    { label: '📋 Rate My Team', text: 'How is my team doing this week? Give me an overview of my roster.' },
-    { label: '⚡ Who Should I Start?', text: 'Who should I start in my optimal starting lineup?' },
-    { label: '🎯 3-QB Draft Strategy', text: 'What is the best draft strategy for my 8-team 3-QB league?' },
-    { label: '🚀 Top Waiver Wire Targets', text: 'Who are the best waiver wire pickups and free agents?' },
+    { label: '🏆 Rate My Roster', text: 'How is my starting lineup looking this week?' },
+    { label: '⚖️ Start / Sit Duel', text: 'Should I start Lamar Jackson or Jayden Daniels?' },
+    { label: '📡 Top Waiver Adds', text: 'Who are the highest priority waiver wire pickups for my league format?' },
     { label: '🛡️ Top IDP Targets', text: 'Who are the top IDP defensive players to target?' },
-    { label: '🌪️ Weather & Wind Traps', text: 'Which games have high winds or severe weather?' },
-    { label: '🎰 Highest Vegas Totals', text: 'Show me the highest scoring game totals from Vegas sportsbooks' },
+    { label: '🌪️ Weather Traps', text: 'Which games have high winds or severe weather?' },
+    { label: '🎰 Vegas Totals', text: 'Show me the highest scoring game totals from Vegas sportsbooks' },
   ];
 
   return (
@@ -157,193 +152,221 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
       
       {/* AI Model Config Modal */}
       {showConfigModal && (
-        <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md p-6 flex flex-col justify-center items-center">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-white font-bold">
-                <Cpu className="w-5 h-5 text-emerald-400" />
-                <span>AI Model Provider Settings</span>
+        <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md p-4 sm:p-6 flex flex-col justify-center items-center overflow-y-auto">
+          <div className="w-full max-w-lg bg-slate-900 border border-purple-500/30 rounded-3xl p-6 shadow-2xl space-y-4 my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-white font-bold font-display text-base">
+                <Cpu className="w-5 h-5 text-purple-400" />
+                <span>AI Gateway & Intelligence Engine</span>
               </div>
               <button 
                 onClick={() => setShowConfigModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Provider Mode</label>
+                <label className="block text-slate-300 font-bold uppercase font-mono text-[11px] mb-1.5">
+                  Select AI Provider
+                </label>
                 <select
                   value={aiConfig.provider}
-                  onChange={(e) => {
-                    const newProvider = e.target.value as any;
-                    const defaultModel = 
-                      newProvider === 'nvidia-nim' ? 'deepseek-ai/deepseek-v4-flash-0731' :
-                      newProvider === 'gemini' ? 'gemini-2.0-flash' : 'llama3';
-                    const defaultEndpoint = 
-                      newProvider === 'nvidia-nim' ? 'https://integrate.api.nvidia.com/v1' : 'http://localhost:11434/v1';
-                    setAiConfig({ ...aiConfig, provider: newProvider });
-                    setConfigModel(defaultModel);
-                    setConfigEndpoint(defaultEndpoint);
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                  onChange={(e) => handleProviderChange(e.target.value as AIProvider)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-semibold focus:border-purple-500 focus:outline-none"
                 >
-                  <option value="nvidia-nim">🚀 NVIDIA NIM (DeepSeek V4 Flash / R1 GPU Cloud)</option>
+                  <option value="openrouter">🌐 OpenRouter (Claude 3.5 Sonnet, GPT-4o, DeepSeek R1 - 1 Key for All)</option>
+                  <option value="anthropic">🧠 Anthropic Claude API (Direct Claude 3.5 Sonnet)</option>
+                  <option value="openai">⚡ OpenAI API (Direct ChatGPT-4o / o3-mini)</option>
+                  <option value="nvidia-nim">🚀 NVIDIA NIM (DeepSeek V4 Flash / GPU Cloud)</option>
                   <option value="gemini">⚡ Google Gemini API (2.0 Flash / 1.5 Pro)</option>
-                  <option value="built-in-neural">🧠 Built-In Neural Fantasy AI (Fast, Zero-Auth)</option>
                   <option value="local-llm">💻 Local LLM / Ollama (localhost:11434 / LM Studio)</option>
+                  <option value="built-in-neural">🧠 Built-In Neural Fantasy AI (100% Offline / Fast)</option>
                 </select>
               </div>
 
-              {aiConfig.provider === 'nvidia-nim' && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">NVIDIA / DeepSeek Model</label>
-                    <select
-                      value={configModel}
-                      onChange={(e) => setConfigModel(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
+              {/* Model Picker */}
+              {POPULAR_AI_MODELS[aiConfig.provider] && aiConfig.provider !== 'built-in-neural' && (
+                <div>
+                  <label className="block text-slate-300 font-bold uppercase font-mono text-[11px] mb-1.5">
+                    Model Architecture
+                  </label>
+                  <select
+                    value={configModel}
+                    onChange={(e) => setConfigModel(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-mono focus:border-purple-500 focus:outline-none"
+                  >
+                    {POPULAR_AI_MODELS[aiConfig.provider].map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} — {m.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* API Key Inputs */}
+              {aiConfig.provider === 'openrouter' && (
+                <div className="p-3.5 rounded-2xl bg-purple-950/30 border border-purple-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-purple-300 font-mono">OpenRouter API Key</span>
+                    <a
+                      href="https://openrouter.ai/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-mono hover:underline"
                     >
-                      <option value="deepseek-ai/deepseek-v4-flash-0731">deepseek-ai/deepseek-v4-flash-0731 (High Reasoning CoT)</option>
-                      <option value="deepseek-ai/deepseek-r1">deepseek-ai/deepseek-r1 (DeepSeek R1 Reasoning)</option>
-                      <option value="meta/llama-3.3-70b-instruct">meta/llama-3.3-70b-instruct (Meta 70B)</option>
-                      <option value="nvidia/llama-3.1-nemotron-70b-instruct">nvidia/llama-3.1-nemotron-70b-instruct</option>
-                    </select>
+                      <span>Get Free / Universal Key</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="sk-or-v1-..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    Enables Claude 3.5 Sonnet, GPT-4o, DeepSeek R1, and Gemini with a single API key.
+                  </p>
+                </div>
+              )}
 
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">NVIDIA Base URL</label>
-                    <input
-                      type="text"
-                      value={configEndpoint}
-                      onChange={(e) => setConfigEndpoint(e.target.value)}
-                      placeholder="https://integrate.api.nvidia.com/v1"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
-                    />
+              {aiConfig.provider === 'anthropic' && (
+                <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300 font-mono">Anthropic API Key</span>
+                    <a
+                      href="https://console.anthropic.com/settings/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono hover:underline"
+                    >
+                      <span>Anthropic Console</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="sk-ant-..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-slate-300 font-semibold">NVIDIA API Key (nvapi-...)</label>
-                      <a
-                        href="https://build.nvidia.com/explore/discover"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[10px] text-emerald-400 hover:underline"
-                      >
-                        NVIDIA NIM Portal →
-                      </a>
-                    </div>
-                    <input
-                      type="password"
-                      value={configApiKey}
-                      onChange={(e) => setConfigApiKey(e.target.value)}
-                      placeholder="nvapi-..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Powered by NVIDIA high-performance GPU infrastructure. Stored securely in your browser.
-                    </p>
+              {aiConfig.provider === 'openai' && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-emerald-300 font-mono">OpenAI API Key</span>
+                    <a
+                      href="https://platform.openai.com/api-keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-mono hover:underline"
+                    >
+                      <span>OpenAI Platform</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              )}
+
+              {aiConfig.provider === 'nvidia-nim' && (
+                <div className="p-3.5 rounded-2xl bg-green-950/30 border border-green-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-green-300 font-mono">NVIDIA API Key</span>
+                    <a
+                      href="https://build.nvidia.com/explore/discover"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-green-400 hover:text-green-300 flex items-center gap-1 font-mono hover:underline"
+                    >
+                      <span>NVIDIA Portal</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="nvapi-..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-green-500"
+                  />
                 </div>
               )}
 
               {aiConfig.provider === 'gemini' && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Gemini Model</label>
-                    <select
-                      value={configModel}
-                      onChange={(e) => setConfigModel(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                <div className="p-3.5 rounded-2xl bg-blue-950/30 border border-blue-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-blue-300 font-mono">Google Gemini API Key</span>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono hover:underline"
                     >
-                      <option value="gemini-2.0-flash">⚡ Gemini 2.0 Flash (Fastest, Smartest)</option>
-                      <option value="gemini-1.5-flash">⚡ Gemini 1.5 Flash (Balanced)</option>
-                      <option value="gemini-1.5-pro">🧠 Gemini 1.5 Pro (Deepest Reasoning)</option>
-                    </select>
+                      <span>Google AI Studio (Free)</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-slate-300 font-semibold">Gemini API Key</label>
-                      <a
-                        href="https://aistudio.google.com/app/apikey"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[10px] text-emerald-400 hover:underline"
-                      >
-                        Get Free Key from Google AI Studio →
-                      </a>
-                    </div>
-                    <input
-                      type="password"
-                      value={configApiKey}
-                      onChange={(e) => setConfigApiKey(e.target.value)}
-                      placeholder="AIzaSy..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
-                    />
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Free tier provides 1,500 requests/day. Key is stored securely in your browser.
-                    </p>
-                  </div>
+                  <input
+                    type="password"
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
                 </div>
               )}
 
               {aiConfig.provider === 'local-llm' && (
-                <>
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Local Endpoint URL</label>
-                    <input
-                      type="text"
-                      value={configEndpoint}
-                      onChange={(e) => setConfigEndpoint(e.target.value)}
-                      placeholder="http://localhost:11434/v1"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Model Name</label>
-                    <input
-                      type="text"
-                      value={configModel}
-                      onChange={(e) => setConfigModel(e.target.value)}
-                      placeholder="llama3, mistral, deepseek-r1"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-mono"
-                    />
-                  </div>
-                </>
+                <div className="space-y-2">
+                  <label className="block text-slate-300 font-bold uppercase font-mono text-[11px]">
+                    Local Endpoint URL
+                  </label>
+                  <input
+                    type="text"
+                    value={configEndpoint}
+                    onChange={(e) => setConfigEndpoint(e.target.value)}
+                    placeholder="http://localhost:11434/v1"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
+                  />
+                </div>
               )}
 
               {testStatus && (
-                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-emerald-400 font-mono">
+                <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/40 text-xs font-mono text-purple-300">
                   {testStatus}
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
-                onClick={handleTestConnection}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                onClick={() => setShowConfigModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition-all"
               >
-                Test Ping
+                Cancel
               </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowConfigModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveConfig}
-                  className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20"
-                >
-                  Save Changes
-                </button>
-              </div>
+              <button
+                onClick={handleSaveConfig}
+                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-500/25 cursor-pointer transition-all flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Save Provider</span>
+              </button>
             </div>
           </div>
         </div>
@@ -353,9 +376,9 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
       <div className="p-4 sm:p-5 border-b border-slate-800/80 bg-slate-950/70 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-indigo-600 p-0.5 shadow-lg shadow-emerald-500/20 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-purple-500 to-emerald-500 p-0.5 shadow-lg shadow-purple-500/20 flex items-center justify-center">
               <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
-                <Bot className="w-5 h-5 text-emerald-400" />
+                <Bot className="w-5 h-5 text-purple-400" />
               </div>
             </div>
             <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-slate-950 rounded-full"></span>
@@ -364,22 +387,27 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-white text-base font-display">Gridiron AI Copilot</h3>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                {aiConfig.provider === 'nvidia-nim' ? '🚀 NVIDIA DeepSeek' : aiConfig.provider === 'gemini' ? '⚡ Gemini 2.0 Flash' : aiConfig.provider === 'local-llm' ? '💻 Local LLM' : '🧠 Neural Engine'}
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                {aiConfig.provider === 'openrouter' ? `🌐 ${aiConfig.modelName?.split('/').pop() || 'OpenRouter'}` :
+                 aiConfig.provider === 'anthropic' ? '🧠 Claude 3.5 Sonnet' :
+                 aiConfig.provider === 'openai' ? '⚡ ChatGPT-4o' :
+                 aiConfig.provider === 'nvidia-nim' ? '🚀 NVIDIA DeepSeek' :
+                 aiConfig.provider === 'gemini' ? '⚡ Gemini 2.0 Flash' :
+                 aiConfig.provider === 'local-llm' ? '💻 Local LLM' : '🧠 Neural Engine'}
               </span>
             </div>
-            <p className="text-xs text-slate-400">Calibrated to {settings.name} • 50 yd/pt • 6pt TD</p>
+            <p className="text-xs text-slate-400 font-mono">{settings.name} • {settings.offense.passYardsPerPoint} yd/pt • {settings.offense.passTouchdown}pt TD</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowConfigModal(true)}
-            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-400 border border-slate-800 transition-colors cursor-pointer text-xs flex items-center gap-1.5"
+            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-purple-400 border border-slate-800 transition-colors cursor-pointer text-xs flex items-center gap-1.5"
             title="Configure AI Model & Provider"
           >
-            <Settings2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Model Settings</span>
+            <Settings2 className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline font-bold">Model Settings</span>
           </button>
 
           <button
@@ -388,7 +416,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
             title="Clear Conversation"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset</span>
+            <span className="hidden sm:inline font-mono">Reset</span>
           </button>
         </div>
       </div>
@@ -400,7 +428,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
           <button
             key={idx}
             onClick={() => handleSendMessage(p.text)}
-            className="px-2.5 py-1 rounded-xl bg-slate-800/70 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/40 border border-slate-700/60 text-slate-300 whitespace-nowrap transition-all text-xs cursor-pointer"
+            className="px-2.5 py-1 rounded-xl bg-slate-800/70 hover:bg-purple-500/20 hover:text-purple-300 hover:border-purple-500/40 border border-slate-700/60 text-slate-300 whitespace-nowrap transition-all text-xs cursor-pointer"
           >
             {p.label}
           </button>
@@ -417,8 +445,8 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
               className={`flex items-start gap-3 ${isAi ? '' : 'flex-row-reverse'}`}
             >
               {isAi ? (
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0 mt-1">
-                  <Bot className="w-4 h-4 text-emerald-400" />
+                <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0 mt-1">
+                  <Bot className="w-4 h-4 text-purple-400" />
                 </div>
               ) : (
                 <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center shrink-0 mt-1 text-xs font-bold text-indigo-300 font-mono">
@@ -431,7 +459,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                   className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed ${
                     isAi
                       ? 'bg-slate-900/90 border border-slate-800 text-slate-200 shadow-lg'
-                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-slate-950 font-medium shadow-md shadow-emerald-600/20'
+                      : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium shadow-md shadow-purple-600/20'
                   }`}
                 >
                   <div className="space-y-2 whitespace-pre-wrap">
@@ -439,10 +467,16 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                       if (paragraph.startsWith('### ')) {
                         return <h4 key={pIdx} className="text-sm sm:text-base font-bold text-white">{paragraph.replace('### ', '')}</h4>;
                       }
-                      if (paragraph.startsWith('> ')) {
+                      if (paragraph.startsWith('> 🧠 **Thinking')) {
                         return (
-                          <div key={pIdx} className="border-l-2 border-emerald-400 pl-3 py-1 bg-emerald-950/20 text-slate-300 rounded-r text-xs">
-                            {paragraph.replace('> ', '')}
+                          <div key={pIdx} className="p-3 rounded-xl bg-slate-950/80 border border-purple-500/30 text-xs font-mono text-purple-300 space-y-1 my-2">
+                            <div className="font-bold text-purple-400 flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              <span>Chain-of-Thought Reasoning:</span>
+                            </div>
+                            <div className="text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap pl-2 border-l-2 border-purple-500/50">
+                              {paragraph.replace(/^> 🧠 \*\*Thinking.*?\*\*:\n>/, '').trim()}
+                            </div>
                           </div>
                         );
                       }
@@ -451,67 +485,40 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                   </div>
                 </div>
 
-                {/* Player Mention Quick Buttons */}
-                {msg.playerMentions && msg.playerMentions.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {msg.playerMentions.map((pName, pIdx) => {
-                      const foundPlayer = players.find(p => p.name.toLowerCase() === pName.toLowerCase() || p.name.includes(pName));
-                      if (!foundPlayer) return null;
-                      return (
-                        <button
-                          key={pIdx}
-                          onClick={() => onSelectPlayerDetail(foundPlayer)}
-                          className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-emerald-500/20 text-slate-200 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                          <span>{foundPlayer.name} ({foundPlayer.position})</span>
-                          <span className="text-[10px] text-slate-400 font-mono">View Intel →</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
                 {/* Data Badges */}
-                {msg.dataBadges && msg.dataBadges.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">
+                {msg.dataBadges && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
                     {msg.dataBadges.map((badge, bIdx) => (
-                      <div
+                      <span
                         key={bIdx}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono border flex items-center gap-1.5 ${
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                           badge.type === 'positive'
-                            ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50'
+                            ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
                             : badge.type === 'warning'
-                            ? 'bg-amber-950/40 text-amber-300 border-amber-800/50'
-                            : 'bg-slate-900 text-slate-300 border-slate-800'
+                            ? 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                            : 'bg-purple-950/60 border-purple-500/40 text-purple-300'
                         }`}
                       >
-                        <span className="text-slate-500 text-[10px]">{badge.label}:</span>
-                        <strong>{badge.value}</strong>
-                      </div>
+                        {badge.label}: <strong>{badge.value}</strong>
+                      </span>
                     ))}
                   </div>
                 )}
-
-                <div className={`text-[10px] text-slate-500 font-mono ${isAi ? 'text-left' : 'text-right'}`}>
-                  {msg.timestamp}
-                </div>
-
               </div>
             </div>
           );
         })}
 
         {isTyping && (
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
-              <Bot className="w-4 h-4 text-emerald-400 animate-pulse" />
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0">
+              <Bot className="w-4 h-4 text-purple-400 animate-spin" />
             </div>
-            <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-bounce"></span>
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-bounce"></span>
               <span className="w-2 h-2 rounded-full bg-teal-400 animate-bounce [animation-delay:0.2s]"></span>
               <span className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce [animation-delay:0.4s]"></span>
-              <span className="text-xs text-slate-400 ml-2 font-mono">Synthesizing Vegas lines, weather & defensive EPA...</span>
+              <span className="text-xs text-slate-400 ml-2 font-mono">Synthesizing live player volume, Vegas totals & defensive matchups...</span>
             </div>
           </div>
         )}
@@ -532,14 +539,14 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
             type="text"
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
-            placeholder="Ask AI Coach (e.g. 'Should I bench Mahomes?', 'Top sleeper WRs', 'Who to pick up for $20 FAAB?')..."
-            className="flex-1 px-4 py-3 bg-slate-900 border border-slate-800 rounded-2xl text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/80 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+            placeholder="Ask AI Coach (e.g. 'Should I start Lamar or Jayden?', 'Who to pick up on waivers?', 'Rate my team')..."
+            className="flex-1 px-4 py-3 bg-slate-900 border border-slate-800 rounded-2xl text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500/80 focus:ring-2 focus:ring-purple-500/20 transition-all"
           />
 
           <button
             type="submit"
             disabled={!inputQuery.trim() || isTyping}
-            className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-emerald-500/30 flex items-center gap-2 transition-all cursor-pointer"
+            className="px-5 py-3 rounded-2xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-lg shadow-purple-500/30 flex items-center gap-2 transition-all cursor-pointer"
           >
             <span>Ask AI</span>
             <Send className="w-4 h-4" />

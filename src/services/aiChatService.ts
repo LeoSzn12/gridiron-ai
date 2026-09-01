@@ -2,14 +2,60 @@ import type { Player, LeagueSettings, ChatMessage } from '../types';
 import { calculateProjection, comparePlayers } from './aiEngine';
 import { solveOptimalLineup } from './lineupOptimizer';
 
+export type AIProvider = 
+  | 'openrouter' 
+  | 'anthropic' 
+  | 'openai' 
+  | 'gemini' 
+  | 'nvidia-nim' 
+  | 'local-llm' 
+  | 'built-in-neural';
+
 export interface AIProviderConfig {
-  provider: 'built-in-neural' | 'gemini' | 'nvidia-nim' | 'local-llm' | 'window-ai';
+  provider: AIProvider;
   apiKey?: string;
-  localEndpoint?: string; // e.g. https://integrate.api.nvidia.com/v1 or http://localhost:11434/v1
-  modelName?: string;     // e.g. deepseek-ai/deepseek-v4-flash-0731, gemini-2.0-flash, llama3
+  localEndpoint?: string;
+  modelName?: string;
 }
 
-const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v1';
+const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v2';
+
+export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: string; description: string }>> = {
+  'openrouter': [
+    { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', description: 'Deepest NFL tactical reasoning & scheme mastery' },
+    { id: 'openai/gpt-4o', name: 'ChatGPT-4o', description: 'Top-tier analytical precision & start/sit clarity' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
+    { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', description: 'Ultra-fast multimodal search & live speed' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', description: 'Open-weights powerhouse' },
+  ],
+  'openai': [
+    { id: 'gpt-4o', name: 'ChatGPT-4o (Omni)', description: 'Flagship OpenAI model' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Fast, lightweight & highly capable' },
+    { id: 'o3-mini', name: 'o3-mini (Reasoning)', description: 'Advanced mathematical logic' },
+  ],
+  'anthropic': [
+    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Industry benchmark in analysis' },
+    { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', description: 'Instant response latency' },
+  ],
+  'gemini': [
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Next-gen speed & live reasoning' },
+    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Deep analytical context window' },
+    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Balanced everyday performer' },
+  ],
+  'nvidia-nim': [
+    { id: 'deepseek-ai/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash (CoT)', description: 'NVIDIA GPU Accelerated Chain-of-Thought' },
+    { id: 'deepseek-ai/deepseek-r1', name: 'DeepSeek R1', description: 'High-reasoning pure logic' },
+    { id: 'meta/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', description: 'NVIDIA NIM High Throughput' },
+  ],
+  'local-llm': [
+    { id: 'llama3:latest', name: 'Llama 3 (Local Ollama)', description: 'Runs 100% offline on your machine' },
+    { id: 'mistral:latest', name: 'Mistral (Local)', description: 'Fast local reasoning' },
+    { id: 'deepseek-r1:latest', name: 'DeepSeek R1 (Local)', description: 'Local thinking model' },
+  ],
+  'built-in-neural': [
+    { id: 'neural-engine-v2', name: 'Gridiron Statistical Engine', description: 'Instant client-side 5-factor composite model' }
+  ]
+};
 
 export function getSavedAIConfig(): AIProviderConfig {
   try {
@@ -19,31 +65,29 @@ export function getSavedAIConfig(): AIProviderConfig {
     // ignore
   }
 
-  // Check if NVIDIA or Gemini env variable is provided (e.g. from Netlify or .env)
+  // Check if OpenRouter key is provided via env
+  const envOpenRouterKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY || '';
+  if (envOpenRouterKey) {
+    return {
+      provider: 'openrouter',
+      apiKey: envOpenRouterKey,
+      modelName: 'anthropic/claude-3.5-sonnet',
+    };
+  }
+
+  // Check if NVIDIA key is provided via env
   const envNvidiaKey = (import.meta as any).env?.VITE_NVIDIA_API_KEY || '';
   if (envNvidiaKey) {
     return {
       provider: 'nvidia-nim',
       apiKey: envNvidiaKey,
-      localEndpoint: 'https://integrate.api.nvidia.com/v1',
       modelName: 'deepseek-ai/deepseek-v4-flash-0731',
     };
   }
 
-  const envGeminiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  if (envGeminiKey) {
-    return {
-      provider: 'gemini',
-      apiKey: envGeminiKey,
-      localEndpoint: 'http://localhost:11434/v1',
-      modelName: 'gemini-2.0-flash',
-    };
-  }
-
   return {
-    provider: 'nvidia-nim',
-    localEndpoint: '/api/ai-chat',
-    modelName: 'deepseek-ai/deepseek-v4-flash-0731',
+    provider: 'openrouter',
+    modelName: 'anthropic/claude-3.5-sonnet',
   };
 }
 
@@ -83,404 +127,244 @@ function buildSystemPrompt(
       }).join('\n')
     : 'No opponent roster loaded.';
 
-  return `You are Gridiron AI, an expert NFL Fantasy Football Strategist & Mathematical Lineup Analyst.
-Active League: "${settings.name}" (${settings.userTeamName})
-League Scoring & Rules:
+  return `You are Gridiron AI, an elite NFL Fantasy Football Strategist, Lineup Optimizer, and Betting Analyst.
+Active League Profile: "${settings.name}" (${settings.userTeamName})
+League Scoring & Roster Architecture:
 - Format: ${settings.numTeams} Teams, ${settings.roster.qb} Starting QBs, ${settings.roster.rb} Starting RBs, ${settings.roster.wr} Starting WRs, ${settings.roster.te} TEs
-- Scoring Scale: Passing = ${settings.offense.passYardsPerPoint} yds/pt (${settings.offense.passTouchdown}pt Pass TD), Rushing/Receiving = ${settings.offense.rushYardsPerPoint} yds/pt (${settings.offense.rushTouchdown}pt TD), PPR = ${settings.offense.receptionsPPR} pts/rec.
+- Scoring System: Passing = ${settings.offense.passYardsPerPoint} yds/pt (${settings.offense.passTouchdown}pt Pass TD, ${settings.offense.interception}pt INT), Rushing/Receiving = ${settings.offense.rushYardsPerPoint} yds/pt (${settings.offense.rushTouchdown}pt TD), PPR = ${settings.offense.receptionsPPR} pts/rec.
 
-User's Active Team Roster (${myRoster?.length || 0} players):
+User's Active Starting Team Roster (${myRoster?.length || 0} players):
 ${myRosterSummary}
 
 Opponent's Team Roster:
 ${oppRosterSummary}
 
-League Top Players & Projections:
+Top League Projections & Matchups:
 ${topPlayersSummary}
 
-Instructions:
-1. Provide concise, high-conviction, mathematically grounded fantasy football advice tailored specifically to the user's roster when applicable.
-2. Directly answer start/sit, trade, waiver wire, weather, and draft questions.
-3. Highlight floor vs ceiling, Vegas implied totals, and 3-QB positional scarcity.
-4. Format responses cleanly using markdown headers (###), bullet points, and bold text.`;
+Analysis Directives:
+1. Deliver concise, high-conviction, mathematically grounded fantasy football counsel tailored to the user's starting lineup.
+2. Directly answer start/sit questions with clear confidence margins and ceiling/floor risk assessments.
+3. Factor in Vegas implied game totals, spread scripts, receiver target shares, and stadium weather.
+4. Format all responses cleanly using markdown headers (###), bullet points, and bold text.`;
 }
 
 /**
- * Call Gemini API directly (Google AI Studio)
+ * Universal AI Gateway Dispatcher (Handles OpenRouter, OpenAI, Claude, NVIDIA NIM, Gemini, Local LLM)
  */
-async function callGeminiAPI(
-  query: string, 
-  players: Player[], 
-  settings: LeagueSettings, 
-  apiKey: string, 
-  modelName: string = 'gemini-1.5-flash',
-  myRoster?: Player[],
-  opponentRoster?: Player[]
-): Promise<string> {
-  const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: `${systemPrompt}\n\nUser Question: ${query}` }
-          ]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 800,
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Gemini API error status: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No response returned from Gemini API');
-  return text;
-}
-
-/**
- * Call NVIDIA NIM API / DeepSeek (via /api/ai-chat proxy or direct)
- */
-async function callNvidiaNimAPI(
+async function callUniversalAIProxy(
   query: string,
   players: Player[],
   settings: LeagueSettings,
-  apiKey: string = '',
-  modelName: string = 'deepseek-ai/deepseek-v4-flash-0731',
-  baseUrl: string = '/api/ai-chat',
+  config: AIProviderConfig,
   myRoster?: Player[],
   opponentRoster?: Player[]
-): Promise<{ text: string; reasoning?: string }> {
+): Promise<{ text: string; reasoning?: string; modelName: string; providerName: string }> {
   const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
 
-  // If using local/Netlify proxy endpoint
-  if (baseUrl === '/api/ai-chat' || baseUrl.startsWith('/')) {
-    const proxyRes = await fetch('/api/ai-chat', {
+  // 1. If Local LLM (Ollama)
+  if (config.provider === 'local-llm') {
+    const endpoint = (config.localEndpoint || 'http://localhost:11434/v1').replace(/\/+$/, '');
+    const res = await fetch(`${endpoint}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: query,
-        systemPrompt,
-        model: modelName,
-        apiKey: apiKey.trim() || undefined,
+        model: config.modelName || 'llama3',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: query }
+        ],
         temperature: 0.7,
-        maxTokens: 4096,
+        max_tokens: 1500,
       }),
     });
 
-    if (proxyRes.ok) {
-      const data = await proxyRes.json();
-      if (data.text || data.reasoning) {
-        return {
-          text: data.text || data.reasoning,
-          reasoning: data.reasoning || undefined,
-        };
-      }
-    }
+    if (!res.ok) throw new Error(`Local LLM error status ${res.status}`);
+    const data = await res.json();
+    return {
+      text: data.choices?.[0]?.message?.content || '',
+      modelName: config.modelName || 'Local LLM',
+      providerName: 'Local Ollama',
+    };
   }
 
-  // Direct endpoint call fallback
-  const cleanEndpoint = (baseUrl === '/api/ai-chat' ? 'https://integrate.api.nvidia.com/v1' : baseUrl).replace(/\/+$/, '');
-  const url = `${cleanEndpoint}/chat/completions`;
-  const activeKey = apiKey.trim() || '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';
+  // 2. If Direct Google Gemini API
+  if (config.provider === 'gemini' && config.apiKey?.trim()) {
+    const model = config.modelName || 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey.trim()}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: `${systemPrompt}\n\nUser Question: ${query}` }] }
+        ],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1500 }
+      })
+    });
 
-  const response = await fetch(url, {
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Gemini API error ${res.status}`);
+    }
+
+    const data = await res.json();
+    return {
+      text: data.candidates?.[0]?.content?.parts?.[0]?.text || '',
+      modelName: model,
+      providerName: 'Google Gemini',
+    };
+  }
+
+  // 3. Universal Serverless Proxy (/api/ai-chat) for OpenRouter, Claude, ChatGPT, NVIDIA NIM
+  const proxyRes = await fetch('/api/ai-chat', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${activeKey}`,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: modelName,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: query }
-      ],
+      prompt: query,
+      systemPrompt,
+      provider: config.provider,
+      model: config.modelName || (config.provider === 'openrouter' ? 'anthropic/claude-3.5-sonnet' : undefined),
+      apiKey: config.apiKey?.trim() || undefined,
       temperature: 0.7,
-      top_p: 0.95,
-      max_tokens: 4096,
-      chat_template_kwargs: { thinking: true, reasoning_effort: 'high' },
-      extra_body: { chat_template_kwargs: { thinking: true, reasoning_effort: 'high' } },
-      stream: false,
-    })
+      maxTokens: 3000,
+    }),
   });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `NVIDIA NIM API error status: ${response.status}`);
+  if (!proxyRes.ok) {
+    const errText = await proxyRes.text();
+    throw new Error(`AI Gateway error (${proxyRes.status}): ${errText}`);
   }
 
-  const data = await response.json();
-  const choice = data.choices?.[0];
-  const message = choice?.message;
-  const content = message?.content || '';
-  const reasoning = message?.reasoning || message?.reasoning_content || '';
-
-  if (!content && !reasoning) {
-    throw new Error('No content returned from NVIDIA NIM API');
+  const data = await proxyRes.json();
+  if (!data.text && !data.reasoning) {
+    throw new Error('Empty response received from AI Gateway');
   }
 
   return {
-    text: content || reasoning,
-    reasoning: reasoning || undefined,
+    text: data.text || data.reasoning,
+    reasoning: data.reasoning || undefined,
+    modelName: data.model || config.modelName || 'Cloud Model',
+    providerName: config.provider === 'openrouter' ? 'OpenRouter Gateway' :
+                  config.provider === 'anthropic' ? 'Anthropic Claude' :
+                  config.provider === 'openai' ? 'OpenAI ChatGPT' :
+                  config.provider === 'nvidia-nim' ? 'NVIDIA GPU Cloud' : 'Cloud LLM',
   };
 }
 
 /**
- * Call Local LLM via OpenAI-compatible endpoint (Ollama / LM Studio / Local Daemon)
- */
-async function callLocalLLM(
-  query: string,
-  players: Player[],
-  settings: LeagueSettings,
-  endpointUrl: string = 'http://localhost:11434/v1',
-  modelName: string = 'llama3',
-  myRoster?: Player[],
-  opponentRoster?: Player[]
-): Promise<string> {
-  const systemPrompt = buildSystemPrompt(players, settings, myRoster, opponentRoster);
-  const cleanEndpoint = endpointUrl.replace(/\/+$/, '');
-  const url = `${cleanEndpoint}/chat/completions`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: query }
-      ],
-      temperature: 0.7,
-      max_tokens: 800,
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`Local LLM (${url}) returned status ${response.status}`);
-  }
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('No content received from Local LLM');
-  return text;
-}
-
-/**
- * Advanced Neural Heuristic Fallback with Fuzzy NLP & Typos Understanding
+ * Built-In Neural NLP Engine (Offline Fallback)
  */
 function generateHeuristicResponse(
   query: string, 
   players: Player[], 
-  settings: LeagueSettings,
-  myRoster?: Player[],
+  settings: LeagueSettings, 
+  myRoster?: Player[], 
   _opponentRoster?: Player[]
 ): ChatMessage {
-  const cleanQuery = query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-  const tokens = cleanQuery.split(/\s+/).filter(Boolean);
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const messageId = `msg-${Math.floor(Math.random() * 1000000)}`;
+  const q = query.toLowerCase();
 
-  const activeRoster = (myRoster && myRoster.length > 0) ? myRoster : players.slice(0, 15);
-
-  // 1. Roster Review / My Team query ("how is my team doing", "my team", "roster review", "team overview")
-  if (tokens.some(t => ['team', 'myteam', 'roster', 'review', 'squad', 'lineup', 'outlook'].includes(t)) && 
-      (tokens.includes('my') || tokens.includes('how') || tokens.includes('rate') || tokens.includes('check'))) {
-    
-    const userStarters = activeRoster.slice(0, 9);
-    const totalProj = userStarters.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0);
-    const injured = activeRoster.filter(p => p.injuryStatus !== 'HEALTHY');
-
-    const topAsset = [...activeRoster].sort((a, b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+  // 1. START/SIT COMPARISON
+  const mentionedPlayers = players.filter(p => q.includes(p.name.toLowerCase()));
+  if (mentionedPlayers.length >= 2) {
+    const p1 = mentionedPlayers[0];
+    const p2 = mentionedPlayers[1];
+    const comparison = comparePlayers(p1, p2, settings);
+    const winner = p1.id === comparison.recommendedPlayerId ? p1 : p2;
+    const loser = p1.id === comparison.recommendedPlayerId ? p2 : p1;
+    const winProj = calculateProjection(winner, settings);
+    const loseProj = calculateProjection(loser, settings);
 
     return {
-      id: messageId,
+      id: `ai-${Date.now()}`,
       sender: 'ai',
-      text: `### 📋 Roster Intelligence Briefing for **${settings.userTeamName}**\n\n` +
-        `**Projected Starting Total:** **${totalProj.toFixed(1)} pts** across your starting slots.\n` +
-        `**Top Projected Anchor:** **${topAsset?.name || 'Lamar Jackson'}** (${calculateProjection(topAsset || activeRoster[0], settings).projectedPoints} pts)\n\n` +
-        `**Active Status & Health:**\n` +
-        (injured.length > 0 
-          ? `• ⚠️ **${injured.length} Injury Flags:** ${injured.map(i => `${i.name} (${i.injuryStatus})`).join(', ')}\n`
-          : `• ✅ **Clean Bill of Health:** All starters designated healthy.\n`) +
-        `• 🌪️ **Weather Check:** ${activeRoster.filter(p => !p.weather.isDome && p.weather.windSpeed >= 12).length} players facing >12 mph winds.\n\n` +
-        `> **Tactical Advice:** Lock in your high-touch goal line rushers to leverage the 6-point touchdown scoring format.`,
+      text: `### 🎯 High-Conviction Start/Sit Recommendation\n\n` +
+        `**START:** **${winner.name}** (${winner.position} - ${winner.team})\n` +
+        `**SIT:** **${loser.name}** (${loser.position} - ${loser.team})\n\n` +
+        `**Confidence Level:** **${comparison.winProbabilityPct}% Probability Edge** (+${comparison.confidenceMargin} projected pts)\n\n` +
+        `**Key Mathematical Edge:**\n` +
+        `• **${winner.name}:** ${winProj.projectedPoints} Proj Pts (Floor: ${winProj.floor}, Ceiling: ${winProj.ceiling}), Implied Total: ${winner.vegas.impliedTeamTotal} pts.\n` +
+        `• **${loser.name}:** ${loseProj.projectedPoints} Proj Pts (Floor: ${loseProj.floor}, Ceiling: ${loseProj.ceiling}), Implied Total: ${loser.vegas.impliedTeamTotal} pts.\n\n` +
+        `**Tactical Rationale:**\n` +
+        comparison.reasoning.map(r => `• ${r}`).join('\n'),
       timestamp,
       dataBadges: [
-        { label: 'Projected', value: `${totalProj.toFixed(1)} pts`, type: 'positive' },
-        { label: 'Health', value: injured.length > 0 ? `${injured.length} Injured` : 'All Healthy', type: injured.length > 0 ? 'warning' : 'positive' },
+        { label: 'Recommended Start', value: winner.name, type: 'positive' },
+        { label: 'Edge Margin', value: `+${comparison.confidenceMargin} pts`, type: 'positive' },
+        { label: 'Confidence', value: `${comparison.winProbabilityPct}%`, type: 'neutral' },
       ],
-    };
-  }
-
-  // 2. Fuzzy matching players mentioned
-  const mentioned = players.filter(p => {
-    const pName = p.name.toLowerCase();
-    const pFirst = p.name.split(' ')[0].toLowerCase();
-    const pLast = p.name.split(' ')[1]?.toLowerCase() || '';
-    return tokens.some(t => t.length >= 3 && (pName.includes(t) || pFirst === t || pLast === t));
-  });
-
-  // If 2+ players mentioned -> Start/Sit Duel
-  if (mentioned.length >= 2) {
-    const pA = mentioned[0];
-    const pB = mentioned[1];
-    const comp = comparePlayers(pA, pB, settings);
-    const winner = players.find(p => p.id === comp.recommendedPlayerId)!;
-    const loser = winner.id === pA.id ? pB : pA;
-    const winnerProj = calculateProjection(winner, settings);
-    const loserProj = calculateProjection(loser, settings);
-
-    return {
-      id: messageId,
-      sender: 'ai',
-      text: `### ⚡ AI Recommendation: Start **${winner.name}** over **${loser.name}**\n\n` +
-        `**League Setup:** ${settings.name} (${settings.roster.qb}-QB, 50 pass yd/pt, 6pt TD)\n` +
-        `**Win Probability Edge:** **${comp.winProbabilityPct}%** | Margin: **+${comp.confidenceMargin} pts**\n\n` +
-        `**Key Decision Drivers:**\n` +
-        `• **Vegas Implied Total:** ${winner.team} implied for **${winner.vegas.impliedTeamTotal} pts** vs ${loser.team} (${loser.vegas.impliedTeamTotal} pts)\n` +
-        `• **Matchup DvP Rank:** ${winner.name} faces **${winner.defense.opponentTeam}** (#${winner.defense.rankVsPosition}) vs ${loser.name} facing **${loser.defense.opponentTeam}** (#${loser.defense.rankVsPosition})\n` +
-        `• **Custom VORP Rating:** ${winner.name} (+${winnerProj.vorpValue} VORP) vs ${loser.name} (+${loserProj.vorpValue} VORP)\n\n` +
-        `> **Tactical Verdict:** ${comp.keyDifferentiator}`,
-      timestamp,
       playerMentions: [winner.name, loser.name],
-      dataBadges: [
-        { label: `${winner.name} Proj`, value: `${winnerProj.projectedPoints} pts`, type: 'positive' },
-        { label: `${loser.name} Proj`, value: `${loserProj.projectedPoints} pts`, type: 'neutral' },
-        { label: 'Win Chance', value: `${comp.winProbabilityPct}%`, type: 'positive' },
-      ],
     };
   }
 
-  // If 1 player mentioned -> Full player intelligence dossier
-  if (mentioned.length === 1) {
-    const player = mentioned[0];
-    const proj = calculateProjection(player, settings);
+  // 2. ROSTER / TEAM RATE
+  if (q.includes('my team') || q.includes('roster') || q.includes('how is my') || q.includes('rate')) {
+    const roster = myRoster && myRoster.length > 0 ? myRoster : players.slice(0, 12);
+    const optimal = solveOptimalLineup(roster, roster.slice(0, 9), settings, 'BALANCED_ALPHA');
+    const totalProj = optimal.totalProjectedPoints;
 
     return {
-      id: messageId,
+      id: `ai-${Math.random()}`,
       sender: 'ai',
-      text: `### 📊 Player Intelligence Profile: **${player.name}** (${player.position} - ${player.team})\n\n` +
-        `**AI Start Rating:** \`${proj.verdict}\` (Confidence: **${proj.startConfidence}%**)\n\n` +
-        `**Projections for ${settings.name}:**\n` +
-        `• **Projected Output:** **${proj.projectedPoints} pts** (Floor: ${proj.floor} pts • Ceiling: ${proj.ceiling} pts)\n` +
-        `• **Boom Probability:** ${proj.boomProbability}% | **Bust Risk:** ${proj.bustProbability}%\n` +
-        `• **Positional VORP:** +${proj.vorpValue} pts above replacement\n\n` +
-        `**Vegas & Matchup Catalyst:**\n` +
-        `• Game Spread: ${player.vegas.gameSpread} | O/U Total: ${player.vegas.overUnder} (${player.team} Implied: **${player.vegas.impliedTeamTotal} pts**)\n` +
-        `• Opponent Defense: **${player.opponent}** (Rank #${player.defense.rankVsPosition} vs ${player.position}, Grade: **${player.defense.matchupGrade}**)\n` +
-        `• Weather: ${player.weather.summary}`,
+      text: `### 📊 Complete Roster Diagnostics for **${settings.userTeamName}**\n\n` +
+        `Your optimal starting lineup projects for **${totalProj.toFixed(1)} Total Points** in **${settings.name}**:\n\n` +
+        optimal.starters.map(p => {
+          const proj = calculateProjection(p, settings);
+          return `• **${p.position}:** ${p.name} (${p.team}) — **${proj.projectedPoints} pts** (Floor: ${proj.floor}, Ceiling: ${proj.ceiling})`;
+        }).join('\n') + `\n\n` +
+        `**Optimal Bench:** ${optimal.bench.map(p => p.name).join(', ')}\n\n` +
+        `**Key Strengths:** High-powered QB tier with favorable passing scripts and red-zone carry share.`,
       timestamp,
-      playerMentions: [player.name],
       dataBadges: [
-        { label: 'Projected', value: `${proj.projectedPoints} pts`, type: 'positive' },
-        { label: 'VORP', value: `+${proj.vorpValue}`, type: 'positive' },
-        { label: 'Matchup', value: `Grade ${player.defense.matchupGrade}`, type: player.defense.rankVsPosition >= 20 ? 'positive' : 'warning' },
+        { label: 'Active Starters', value: `${optimal.starters.length} Players`, type: 'positive' },
+        { label: 'Projected Points', value: `${totalProj.toFixed(1)} pts`, type: 'positive' },
+        { label: 'Scoring Rules', value: `${settings.offense.passYardsPerPoint} yd / ${settings.offense.passTouchdown}pt TD`, type: 'neutral' },
       ],
     };
   }
 
-  // 3. Start / Sit Intent
-  const isStartSitIntent = tokens.some(t => ['start', 'sit', 'atrt', 'strt', 'lineup', 'who', 'bench'].includes(t));
-  if (isStartSitIntent) {
-    const optimal = solveOptimalLineup(activeRoster, activeRoster, settings, 'BALANCED_ALPHA');
-    const topStarters = optimal.starters.slice(0, 6).map(p => {
-      const pr = calculateProjection(p, settings);
-      return `• **${p.name}** (${p.position} - ${p.team}): **${pr.projectedPoints} pts** (Floor: ${pr.floor} pts, Vegas: ${p.vegas.impliedTeamTotal} pts)`;
-    }).join('\n');
-
+  // 3. WAIVER WIRE
+  if (q.includes('waiver') || q.includes('pickup') || q.includes('free agent') || q.includes('faab')) {
+    const waivers = players.filter(p => p.isWaiverTarget).slice(0, 4);
     return {
-      id: messageId,
+      id: `ai-${Math.random()}`,
       sender: 'ai',
-      text: `### 🏆 Optimal Starting Lineup Recommendations for **${settings.name}**\n\n` +
-        `Based on our Integer Linear Programming solver calibrated for your **${settings.numTeams}-team, ${settings.roster.qb}-QB, 50 pass yd / 6pt TD** league:\n\n` +
-        `${topStarters}\n\n` +
-        `**Key Tactical Advice:**\n` +
-        `1. **Lock In High-Touch Goal Line Assets:** In a 50 yd/pt format, 6pt rushing/receiving touchdowns account for over 65% of total weekly fantasy output.\n` +
-        `2. **Start QBs with High Vegas Totals:** High implied totals create maximum touchdown probability.\n` +
-        `3. **Weather Check:** Avoid starting deep-threat pass catchers facing >15 mph wind drag.`,
+      text: `### 📡 Top Priority Waiver Wire Targets\n\n` +
+        waivers.map((w, idx) => {
+          const proj = calculateProjection(w, settings);
+          return `**#${idx + 1} ${w.name}** (${w.position} - ${w.team})\n` +
+                 `• **Recommended FAAB:** **${w.faabRecommendedPct}% FAAB**\n` +
+                 `• **Weekly Projection:** **${proj.projectedPoints} pts** | TD Odds: **${w.vegas.props.anytimeTDOdds}**\n` +
+                 `• **Reason to Add:** ${w.aiAnalysisSummary || 'Surging snap share and high red-zone target volume.'}\n`;
+        }).join('\n'),
       timestamp,
       dataBadges: [
-        { label: 'Optimal Starters', value: `${optimal.starters.length} Locked`, type: 'positive' },
-        { label: 'Total Proj', value: `${optimal.totalProjectedPoints} pts`, type: 'positive' },
-        { label: 'Format', value: `${settings.roster.qb}-QB Scale`, type: 'neutral' },
+        { label: 'Priority Target', value: waivers[0]?.name || 'Available', type: 'positive' },
+        { label: 'Max Recommended FAAB', value: `${waivers[0]?.faabRecommendedPct || 15}%`, type: 'warning' },
       ],
     };
   }
 
-  // 4. Draft Intent
-  if (tokens.some(t => ['draft', 'drft', 'mock', 'pick', 'rounds', 'vorp'].includes(t))) {
-    return {
-      id: messageId,
-      sender: 'ai',
-      text: `### 🎯 AI Draft Strategy for **${settings.name}**\n\n` +
-        `In an **${settings.numTeams}-team league with ${settings.roster.qb} starting QBs (24 starting QBs in the league)**:\n\n` +
-        `1. **QB Scarcity is Astronomical**: 75% of starting NFL QBs are starting every week. You must draft **2 top-10 QBs in your first 3 rounds** (e.g. Lamar Jackson, Josh Allen, Jayden Daniels).\n` +
-        `2. **Touchdowns Rule the 50 yd/pt Scale**: Because passing yards are 50 yds/pt and rushing/receiving is 20 yds/pt, 6-point touchdowns represent over 65% of total fantasy output!\n` +
-        `3. **5 Starting WRs Requirement**: You need 40 starting WRs drafted across 8 teams. Do not ignore WR depth in rounds 4–8.\n` +
-        `4. **IDP Targets**: Lock in elite edge rushers with 2.0 sack scoring (Maxx Crosby, T.J. Watt) in rounds 7–10.`,
-      timestamp,
-      dataBadges: [
-        { label: 'Priority 1', value: 'Draft 2 Elite QBs Early', type: 'positive' },
-        { label: 'Key Metric', value: 'Touchdowns > Yardage', type: 'warning' },
-      ],
-    };
-  }
-
-  // 5. Waiver Wire Intent
-  if (tokens.some(t => ['waiver', 'wire', 'faab', 'pickup', 'freagent', 'add', 'drop'].includes(t))) {
-    const topWaiver = players.filter(p => p.isWaiverTarget).slice(0, 3);
-    const waiverList = topWaiver.map(p => `• **${p.name}** (${p.position} - ${p.team}): Recommended **${p.faabRecommendedPct}% FAAB** bid. Snap share surging.`).join('\n');
-
-    return {
-      id: messageId,
-      sender: 'ai',
-      text: `### 🚀 Top Waiver Wire & FAAB Priorities for **${settings.name}**\n\n` +
-        `Here are the highest-upside waiver targets based on snap share spikes and schedule ease:\n\n` +
-        `${waiverList || '• **Tyrone Tracy Jr.** (RB - NYG): 45% FAAB recommended\n• **Brian Thomas Jr.** (WR - JAX): 35% FAAB\n• **Brock Bowers** (TE - LV): Must-roster TE1'}\n\n` +
-        `> **FAAB Strategy:** Be aggressive on backfield starters who command red zone rush share.`,
-      timestamp,
-      dataBadges: [
-        { label: 'Top Priority', value: 'Tyrone Tracy Jr.', type: 'positive' },
-        { label: 'FAAB Budget', value: '$100 Starting', type: 'neutral' },
-      ],
-    };
-  }
-
-  // Default Overview
+  // Default General Advice
   return {
-    id: messageId,
+    id: `ai-${Date.now()}`,
     sender: 'ai',
-    text: `### 🏈 Gridiron AI Strategic Advisor for **${settings.name}**\n\n` +
-      `I am actively calibrated to your exact league rules: **${settings.numTeams} Teams • ${settings.roster.qb} Starting QBs • ${settings.roster.wr} Starting WRs • 50 Pass Yds/Pt • 6pt Pass TDs**.\n\n` +
-      `**How I can help you:**\n` +
-      `• **Start / Sit Decisions:** Ask *"Should I start Lamar Jackson or Jayden Daniels?"* or *"Who should I start?"*\n` +
-      `• **Roster Check:** Ask *"How is my team doing this week?"*\n` +
-      `• **Draft Strategy:** Ask *"What is the best draft strategy for my 3-QB league?"*\n` +
-      `• **Waiver & FAAB:** Ask *"Who are the best waiver pickups this week?"*\n` +
-      `• **Trades & Rest of Season:** Ask *"Should I trade Patrick Mahomes for Saquon Barkley?"*`,
+    text: `### 🏈 Gridiron AI Tactical Intelligence\n\n` +
+      `Here is your real-time strategic overview for **${settings.name}**:\n\n` +
+      `• **League Scoring Multiplier:** ${settings.offense.passYardsPerPoint} pass yds/pt with **${settings.offense.passTouchdown}pt Pass TDs** heavily elevates high-volume passing QBs.\n` +
+      `• **Roster Optimization:** Your roster has ${settings.roster.qb} starting QB slots. Maximizing QB floor and ceiling yields the single largest competitive VORP advantage.\n\n` +
+      `*Ask me any specific start/sit duel (e.g. "Should I start Lamar Jackson or Jayden Daniels?"), trade proposal, or waiver wire question!*`,
     timestamp,
     dataBadges: [
-      { label: 'Active League', value: settings.userTeamName, type: 'positive' },
-      { label: 'Format', value: `${settings.numTeams}-Team ${settings.roster.qb}-QB`, type: 'positive' },
+      { label: 'Active Team', value: settings.userTeamName, type: 'positive' },
+      { label: 'Format', value: `${settings.numTeams} Teams • ${settings.roster.qb} QB`, type: 'positive' },
     ],
   };
 }
 
 /**
- * Main AI Chat Dispatcher (Gemini / Local LLM / Built-in Neural NLP)
+ * Main AI Dispatcher
  */
 export async function getAIChatResponseAsync(
   query: string,
@@ -493,79 +377,31 @@ export async function getAIChatResponseAsync(
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const messageId = `msg-${Math.floor(Math.random() * 1000000)}`;
 
-  // 1. Google Gemini API
-  if (config.provider === 'gemini' && config.apiKey?.trim()) {
-    try {
-      const generatedText = await callGeminiAPI(query, players, settings, config.apiKey.trim(), config.modelName, myRoster, opponentRoster);
-      return {
-        id: messageId,
-        sender: 'ai',
-        text: generatedText,
-        timestamp,
-        dataBadges: [
-          { label: 'AI Model', value: config.modelName || 'Gemini 2.0 Flash', type: 'positive' },
-          { label: 'Latency', value: 'Live Google Cloud', type: 'neutral' },
-        ],
-      };
-    } catch (err: any) {
-      console.warn('Gemini API call failed, falling back to neural heuristic:', err);
-    }
+  // If Built-in Neural Engine chosen
+  if (config.provider === 'built-in-neural') {
+    return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
   }
 
-  // 2. NVIDIA NIM / DeepSeek Cloud API
-  if (config.provider === 'nvidia-nim') {
-    try {
-      const baseUrl = config.localEndpoint || '/api/ai-chat';
-      const result = await callNvidiaNimAPI(
-        query, 
-        players, 
-        settings, 
-        config.apiKey?.trim() || '', 
-        config.modelName || 'deepseek-ai/deepseek-v4-flash-0731', 
-        baseUrl, 
-        myRoster, 
-        opponentRoster
-      );
-      
-      const fullText = result.reasoning
-        ? `> 🧠 **DeepSeek High Reasoning CoT**:\n> ${result.reasoning.split('\n').join('\n> ')}\n\n${result.text}`
-        : result.text;
+  // Call Universal AI Gateway
+  try {
+    const result = await callUniversalAIProxy(query, players, settings, config, myRoster, opponentRoster);
+    const fullText = result.reasoning
+      ? `> 🧠 **Thinking / Chain of Thought**:\n> ${result.reasoning.split('\n').join('\n> ')}\n\n${result.text}`
+      : result.text;
 
-      return {
-        id: messageId,
-        sender: 'ai',
-        text: fullText,
-        timestamp,
-        dataBadges: [
-          { label: 'AI Model', value: config.modelName?.split('/').pop() || 'DeepSeek Flash', type: 'positive' },
-          { label: 'Infrastructure', value: 'NVIDIA GPU Cloud', type: 'neutral' },
-          ...(result.reasoning ? [{ label: 'Reasoning', value: 'DeepSeek Thinking', type: 'positive' as const }] : []),
-        ],
-      };
-    } catch (err: any) {
-      console.warn('NVIDIA NIM API call failed, falling back to neural heuristic:', err);
-    }
+    return {
+      id: messageId,
+      sender: 'ai',
+      text: fullText,
+      timestamp,
+      dataBadges: [
+        { label: 'AI Model', value: result.modelName.split('/').pop() || result.modelName, type: 'positive' },
+        { label: 'Provider', value: result.providerName, type: 'neutral' },
+        ...(result.reasoning ? [{ label: 'Reasoning', value: 'High Effort CoT', type: 'positive' as const }] : []),
+      ],
+    };
+  } catch (err: any) {
+    console.warn('External AI call failed, falling back to built-in Neural Engine:', err);
+    return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
   }
-
-  // 2. Local LLM (Ollama / LM Studio)
-  if (config.provider === 'local-llm' && config.localEndpoint?.trim()) {
-    try {
-      const generatedText = await callLocalLLM(query, players, settings, config.localEndpoint.trim(), config.modelName || 'llama3', myRoster, opponentRoster);
-      return {
-        id: messageId,
-        sender: 'ai',
-        text: generatedText,
-        timestamp,
-        dataBadges: [
-          { label: 'Local LLM', value: config.modelName || 'Local Llama-3', type: 'positive' },
-          { label: 'Endpoint', value: config.localEndpoint, type: 'neutral' },
-        ],
-      };
-    } catch (err: any) {
-      console.warn('Local LLM call failed, falling back to neural heuristic:', err);
-    }
-  }
-
-  // 3. Fallback to rich Neural Heuristic NLP Solver
-  return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
 }
