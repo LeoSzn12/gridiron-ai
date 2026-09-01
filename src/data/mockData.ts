@@ -69,10 +69,10 @@ export const LEO_SZN_YAHOO_PRESET: LeagueSettings = {
     defensiveTouchdown: 6,
     safety: 2,
     blockKick: 2,
-    soloTackle: 1.5,
-    assistedTackle: 0.75,
-    passDefended: 1.5,
-    tackleForLoss: 1.5,
+    soloTackle: 0,
+    assistedTackle: 0,
+    passDefended: 0,
+    tackleForLoss: 0,
   },
 };
 

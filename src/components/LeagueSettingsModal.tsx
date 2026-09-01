@@ -339,52 +339,60 @@ export const LeagueSettingsModal: React.FC<LeagueSettingsModalProps> = ({
         {/* 3. Defense & Kicker Tab */}
         {activeTab === 'defense' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">Sack (DEF):</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.defTeam.sack} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">Interception / Fumble Rec:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.defTeam.interception} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">Defensive / Return TD:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.defTeam.touchdown} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">60+ Yard Field Goal (K):</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.kicker.fg60Plus} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">50-59 Yard Field Goal (K):</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.kicker.fg50Plus} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">Missed PAT (K):</span>
-              <span className="font-mono font-bold text-rose-400">{currentSettings.kicker.patMissed} pt</span>
-            </div>
+            {[
+              { label: 'Sack (DEF)', key: 'sack', obj: 'defTeam', color: 'text-emerald-400' },
+              { label: 'Interception / Fumble Rec', key: 'interception', obj: 'defTeam', color: 'text-emerald-400' },
+              { label: 'Defensive / Return TD', key: 'touchdown', obj: 'defTeam', color: 'text-emerald-400' },
+              { label: '60+ Yard Field Goal (K)', key: 'fg60Plus', obj: 'kicker', color: 'text-emerald-400' },
+              { label: '50-59 Yard Field Goal (K)', key: 'fg50Plus', obj: 'kicker', color: 'text-emerald-400' },
+              { label: 'Missed PAT (K)', key: 'patMissed', obj: 'kicker', color: 'text-rose-400' },
+            ].map(({ label, key, obj, color }) => (
+              <div key={label} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-300">{label}:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={(currentSettings as any)[obj][key]}
+                    onChange={(e) => setCurrentSettings({
+                      ...currentSettings,
+                      [obj]: { ...(currentSettings as any)[obj], [key]: Number(e.target.value) }
+                    })}
+                    className={`w-16 bg-slate-950 border border-slate-700 rounded-lg p-1 text-center font-mono font-bold ${color}`}
+                  />
+                  <span className="text-slate-500">pts</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
         {/* 4. IDP Tab */}
         {activeTab === 'idp' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">IDP Sack:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.idp.sack} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">IDP Interception:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.idp.interception} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">IDP Forced Fumble:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.idp.fumbleForce} pts</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-              <span className="text-slate-300">IDP Solo Tackle:</span>
-              <span className="font-mono font-bold text-emerald-400">{currentSettings.idp.soloTackle} pts</span>
-            </div>
+            {[
+              { label: 'IDP Sack', key: 'sack', color: 'text-emerald-400' },
+              { label: 'IDP Interception', key: 'interception', color: 'text-emerald-400' },
+              { label: 'IDP Forced Fumble', key: 'fumbleForce', color: 'text-emerald-400' },
+              { label: 'IDP Solo Tackle', key: 'soloTackle', color: 'text-emerald-400' },
+            ].map(({ label, key, color }) => (
+              <div key={label} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+                <span className="text-slate-300">{label}:</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={(currentSettings.idp as any)[key]}
+                    onChange={(e) => setCurrentSettings({
+                      ...currentSettings,
+                      idp: { ...currentSettings.idp, [key]: Number(e.target.value) }
+                    })}
+                    className={`w-16 bg-slate-950 border border-slate-700 rounded-lg p-1 text-center font-mono font-bold ${color}`}
+                  />
+                  <span className="text-slate-500">pts</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
