@@ -241,8 +241,8 @@ async function callUniversalAIProxy(
     };
   }
 
-  // 3. Universal Serverless Proxy (/api/ai-chat) for OpenRouter, Claude, ChatGPT, NVIDIA NIM
-  const proxyRes = await fetch('/api/ai-chat', {
+  // 3. Universal Serverless Proxy (/.netlify/functions/ai-chat) for OpenRouter, Claude, ChatGPT, NVIDIA NIM
+  const proxyRes = await fetch('/.netlify/functions/ai-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

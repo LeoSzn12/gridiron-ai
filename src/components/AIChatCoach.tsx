@@ -237,7 +237,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                         if (!key) { setTestStatus('⚠️ Enter your sk-or-... key first.'); return; }
                         setTestStatus('🔄 Testing OpenRouter connection...');
                         try {
-                          const res = await fetch('/api/ai-chat', {
+                          const res = await fetch('/.netlify/functions/ai-chat', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -350,7 +350,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                         if (!key) { setTestStatus('⚠️ Enter your nvapi-... key first.'); return; }
                         setTestStatus('🔄 Testing NVIDIA NIM connection...');
                         try {
-                          const res = await fetch('/api/ai-chat', {
+                          const res = await fetch('/.netlify/functions/ai-chat', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
