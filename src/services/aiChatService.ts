@@ -61,9 +61,33 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
 };
 
 export function getSavedAIConfig(): AIProviderConfig {
+  // Known broken/deprecated model IDs that should be migrated to kimi-k3
+  const MIGRATE_MODELS = new Set([
+    'deepseek/deepseek-r1',       // wrong namespace format
+    'deepseek-ai/deepseek-r1',    // requires special NVIDIA tier
+    'anthropic/claude-3.5-sonnet', // openrouter fallback — user likely never set this
+  ]);
+
   try {
     const saved = localStorage.getItem(DEFAULT_CONFIG_STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed: AIProviderConfig = JSON.parse(saved);
+      // Auto-migrate stale/broken configs → Kimi K3 on NVIDIA NIM
+      const needsMigration =
+        MIGRATE_MODELS.has(parsed.modelName || '') ||
+        (parsed.provider === 'openrouter' && !parsed.apiKey?.trim()); // never configured
+      if (needsMigration) {
+        const migrated: AIProviderConfig = {
+          provider: 'nvidia-nim',
+          apiKey: parsed.provider === 'nvidia-nim' ? (parsed.apiKey || '') : '',
+          modelName: 'moonshotai/kimi-k3',
+        };
+        // Save the migrated config so next load is clean
+        localStorage.setItem(DEFAULT_CONFIG_STORAGE_KEY, JSON.stringify(migrated));
+        return migrated;
+      }
+      return parsed;
+    }
   } catch {
     // ignore
   }
@@ -88,8 +112,7 @@ export function getSavedAIConfig(): AIProviderConfig {
     };
   }
 
-  // Default: use NVIDIA NIM with empty apiKey — the Netlify function reads NVIDIA_API_KEY
-  // from server-side env vars, so the chatbot works without the user needing to configure anything.
+  // Default: NVIDIA NIM + Kimi K3 — Netlify function handles auth server-side
   return {
     provider: 'nvidia-nim',
     apiKey: '',
