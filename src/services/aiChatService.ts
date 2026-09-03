@@ -22,11 +22,11 @@ const DEFAULT_CONFIG_STORAGE_KEY = 'gridiron_ai_config_v2';
 
 export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: string; description: string }>> = {
   'openrouter': [
-    { id: 'deepseek/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash', description: '🔥 Ultra-fast DeepSeek V4 reasoning & analysis on OpenRouter' },
-    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3', description: 'Industry-leading benchmark intelligence & value' },
-    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: 'High-effort chain-of-thought mathematical reasoning' },
+    { id: 'deepseek/deepseek-chat', name: 'DeepSeek V3 (Chat)', description: '🔥 Ultra-fast, state-of-the-art DeepSeek V3 intelligence on OpenRouter' },
+    { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1 Reasoning', description: '🧠 High-effort chain-of-thought mathematical reasoning' },
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', description: 'Deepest NFL tactical reasoning & scheme mastery' },
     { id: 'openai/gpt-4o', name: 'ChatGPT-4o', description: 'Top-tier analytical precision & start/sit clarity' },
+    { id: 'openai/gpt-4o-mini', name: 'ChatGPT-4o Mini', description: 'Fast, lightweight & highly capable' },
     { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash', description: 'Ultra-fast multimodal search & live speed' },
     { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta Llama 3.3 70B', description: 'Open-weights powerhouse' },
   ],
@@ -62,16 +62,16 @@ export const POPULAR_AI_MODELS: Record<AIProvider, Array<{ id: string; name: str
   ]
 };
 
-export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash-0731';
+export const DEFAULT_OPENROUTER_MODEL = 'deepseek/deepseek-chat';
 
 export function getSavedAIConfig(): AIProviderConfig {
   // Stale or broken configs to automatically migrate to OpenRouter + DeepSeek
   const STALE_OR_MIGRATE = new Set([
-    'deepseek/deepseek-r1', // (If you want them on chat vs r1, but let's just migrate broken ones)
+    'deepseek/deepseek-v4-flash-0731',
+    'deepseek-ai/deepseek-v4-flash-0731',
     'deepseek-ai/deepseek-r1',
     'moonshotai/kimi-k3',
     'nvidia/llama-3.1-nemotron-70b-instruct',
-    'anthropic/claude-3.5-sonnet',
   ]);
 
   try {
@@ -81,12 +81,14 @@ export function getSavedAIConfig(): AIProviderConfig {
       // If user was on nvidia-nim (not working) or had stale/invalid model
       const needsMigration = 
         parsed.provider === 'nvidia-nim' || 
-        STALE_OR_MIGRATE.has(parsed.modelName || '');
+        STALE_OR_MIGRATE.has(parsed.modelName || '') ||
+        !parsed.modelName ||
+        parsed.modelName.includes('v4-flash');
       
       if (needsMigration) {
         const migrated: AIProviderConfig = {
           provider: 'openrouter',
-          apiKey: parsed.provider === 'openrouter' ? (parsed.apiKey || '') : '',
+          apiKey: parsed.apiKey || '',
           modelName: DEFAULT_OPENROUTER_MODEL,
         };
         localStorage.setItem(DEFAULT_CONFIG_STORAGE_KEY, JSON.stringify(migrated));
@@ -241,15 +243,70 @@ async function callUniversalAIProxy(
     };
   }
 
-  // 3. Universal Serverless Proxy (/.netlify/functions/ai-chat) for OpenRouter, Claude, ChatGPT, NVIDIA NIM
-  const proxyRes = await fetch('/.netlify/functions/ai-chat', {
+  // 3. Direct Browser Call for OpenRouter (CORS is natively supported by OpenRouter)
+  if (config.provider === 'openrouter' && config.apiKey?.trim()) {
+    try {
+      const activeModel = config.modelName && !config.modelName.includes('v4-flash')
+        ? config.modelName 
+        : DEFAULT_OPENROUTER_MODEL;
+
+      const directRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey.trim()}`,
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+          'X-Title': 'Gridiron AI',
+        },
+        body: JSON.stringify({
+          model: activeModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: query }
+          ],
+          temperature: 0.7,
+          max_tokens: 3000,
+        }),
+      });
+
+      if (!directRes.ok) {
+        const errJson = await directRes.json().catch(() => ({}));
+        const errMsg = errJson.error?.message || `OpenRouter API error (${directRes.status})`;
+        throw new Error(errMsg);
+      }
+
+      const directData = await directRes.json();
+      const choice = directData.choices?.[0];
+      const message = choice?.message;
+      const content = message?.content || '';
+      const reasoning = message?.reasoning || message?.reasoning_content || '';
+
+      if (content || reasoning) {
+        return {
+          text: content || reasoning,
+          reasoning: reasoning || undefined,
+          modelName: directData.model || activeModel,
+          providerName: 'OpenRouter',
+        };
+      }
+    } catch (directErr: any) {
+      // If authentication error or model error, rethrow directly so user knows immediately
+      if (directErr.message && !directErr.message.toLowerCase().includes('failed to fetch')) {
+        throw directErr;
+      }
+      // Otherwise fall back to serverless proxy
+    }
+  }
+
+  // 4. Universal Serverless Proxy (/api/ai-chat) for OpenRouter, Claude, ChatGPT, NVIDIA NIM
+  const proxyRes = await fetch('/api/ai-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       prompt: query,
       systemPrompt,
       provider: config.provider,
-      model: config.modelName || (config.provider === 'openrouter' ? 'anthropic/claude-3.5-sonnet' : undefined),
+      model: config.modelName && !config.modelName.includes('v4-flash') ? config.modelName : DEFAULT_OPENROUTER_MODEL,
       apiKey: config.apiKey?.trim() || undefined,
       temperature: 0.7,
       maxTokens: 3000,
@@ -405,6 +462,19 @@ export async function getAIChatResponseAsync(
   // If Built-in Neural Engine chosen
   if (config.provider === 'built-in-neural') {
     return generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
+  }
+
+  // If OpenRouter and no key provided, prompt the user clearly
+  if (config.provider === 'openrouter' && !config.apiKey?.trim()) {
+    const heuristic = generateHeuristicResponse(query, players, settings, myRoster, opponentRoster);
+    return {
+      ...heuristic,
+      text: `🔑 **OpenRouter API Key Required**\n\nTo chat live with **${config.modelName?.split('/').pop() || 'DeepSeek V3'}** via OpenRouter, please click **Model Settings** (⚙️ icon above) and paste your OpenRouter API key (\`sk-or-...\`).\n\nIn the meantime, here is your instant statistical analysis for your active matchup:\n\n---\n\n${heuristic.text}`,
+      dataBadges: [
+        { label: 'AI Status', value: '🔑 Needs API Key', type: 'warning' as const },
+        { label: 'Engine', value: 'Built-in Model', type: 'neutral' as const },
+      ],
+    };
   }
 
   // Call Universal AI Gateway

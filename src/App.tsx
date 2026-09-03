@@ -300,7 +300,7 @@ export function App() {
     // Only sync once playersList is loaded from Sleeper (>300 players means live data ready)
     if (playersList.length > 300) syncRoster();
     return () => { isMounted = false; };
-  }, [playersList.length]); // re-run when live player DB is ready
+  }, [playersList]); // re-run when live player DB is ready
 
   // Fetch live injury/news feed
   useEffect(() => {
@@ -593,6 +593,8 @@ export function App() {
             players={filteredPlayers}
             settings={leagueSettings}
             onSelectPlayerDetail={(p) => setSelectedPlayerDetail(p)}
+            onLockRoster={(ids, name) => handleImportYahooMyRoster(ids, name)}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
           />
         )}
 

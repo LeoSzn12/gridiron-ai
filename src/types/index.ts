@@ -89,6 +89,7 @@ export interface PlayerGameLog {
 
 export interface Player {
   id: string;
+  sleeperId?: string;
   name: string;
   team: string;
   position: PlayerPosition;

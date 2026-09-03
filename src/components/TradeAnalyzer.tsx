@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { Player, LeagueSettings, PlayerPosition } from '../types';
 import { evaluateTrade, calculateProjection } from '../services/aiEngine';
 import { 
@@ -43,28 +43,38 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
 }) => {
   // Trade Setup
   const [tradeMode, setTradeMode] = useState<'2-team' | '3-team'>('2-team');
-  // Default Side A = top QB from live data; Side B = top RB from live data
-  const defaultSideA = useMemo(() => {
+
+  const [sideAPlayerIds, setSideAPlayerIds] = useState<string[]>(() => {
     const qb = players.filter(p => p.position === 'QB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
     const wr = players.filter(p => p.position === 'WR').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
     return [qb?.id, wr?.id].filter(Boolean) as string[];
-  }, [players.length]);
+  });
 
-  const defaultSideB = useMemo(() => {
+  const [sideBPlayerIds, setSideBPlayerIds] = useState<string[]>(() => {
     const rb = players.filter(p => p.position === 'RB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
     return [rb?.id].filter(Boolean) as string[];
-  }, [players.length]);
+  });
 
-  const [sideAPlayerIds, setSideAPlayerIds] = useState<string[]>([]);
-  const [sideBPlayerIds, setSideBPlayerIds] = useState<string[]>([]);
   const [sideCPlayerIds, setSideCPlayerIds] = useState<string[]>([]);
 
-  // Once live players load, set defaults if sides are empty
+  // If players load asynchronously after initial empty mount, seed defaults once
+  const hasSeededRef = React.useRef(false);
   useEffect(() => {
-    if (sideAPlayerIds.length === 0 && defaultSideA.length > 0) setSideAPlayerIds(defaultSideA);
-    if (sideBPlayerIds.length === 0 && defaultSideB.length > 0) setSideBPlayerIds(defaultSideB);
-  }, [defaultSideA.join(','), defaultSideB.join(',')]);
-
+    if (hasSeededRef.current || players.length === 0) return;
+    const timer = setTimeout(() => {
+      if (sideAPlayerIds.length === 0) {
+        const qb = players.filter(p => p.position === 'QB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+        const wr = players.filter(p => p.position === 'WR').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+        setSideAPlayerIds([qb?.id, wr?.id].filter(Boolean) as string[]);
+      }
+      if (sideBPlayerIds.length === 0) {
+        const rb = players.filter(p => p.position === 'RB').sort((a,b) => calculateProjection(b, settings).projectedPoints - calculateProjection(a, settings).projectedPoints)[0];
+        setSideBPlayerIds([rb?.id].filter(Boolean) as string[]);
+      }
+      hasSeededRef.current = true;
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [players, settings, sideAPlayerIds.length, sideBPlayerIds.length]);
 
   const [sideAPicks, setSideAPicks] = useState<DraftPickAsset[]>([]);
   const [sideBPicks, setSideBPicks] = useState<DraftPickAsset[]>([]);
@@ -88,35 +98,31 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
   // This is what matters for trade decisions — NOT static trade value index
   const remainingWeeks = 14; // conservative estimate
   
-  const calcROSValue = (p: Player) => {
+  const calcROSValue = useCallback((p: Player) => {
     const proj = calculateProjection(p, settings);
     return Number((proj.projectedPoints * remainingWeeks).toFixed(0));
-  };
+  }, [settings]);
 
   // Compute Total Values including Draft Picks — using live custom-scoring projections
   const totalValueA = useMemo(() => {
     const playersVal = sideAPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
     const picksVal = sideAPicks.reduce((sum, pk) => sum + pk.value * remainingWeeks, 0);
     return playersVal + picksVal;
-  }, [sideAPlayers, sideAPicks, settings]);
+  }, [sideAPlayers, sideAPicks, calcROSValue]);
 
   const totalValueB = useMemo(() => {
     const playersVal = sideBPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
     const picksVal = sideBPicks.reduce((sum, pk) => sum + pk.value * remainingWeeks, 0);
     return playersVal + picksVal;
-  }, [sideBPlayers, sideBPicks, settings]);
+  }, [sideBPlayers, sideBPicks, calcROSValue]);
 
   const totalValueC = useMemo(() => {
     return sideCPlayers.reduce((sum, p) => sum + calcROSValue(p), 0);
-  }, [sideCPlayers, settings]);
+  }, [sideCPlayers, calcROSValue]);
 
   // Projected Weekly Points per side (for display)
   const sideAWeeklyPts = useMemo(() => sideAPlayers.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0), [sideAPlayers, settings]);
   const sideBWeeklyPts = useMemo(() => sideBPlayers.reduce((sum, p) => sum + calculateProjection(p, settings).projectedPoints, 0), [sideBPlayers, settings]);
-
-
-
-
 
   // Available Players for selection modal
   const availableForSelection = useMemo(() => {
@@ -130,7 +136,7 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
       }
       return true;
     }).sort((a, b) => calcROSValue(b) - calcROSValue(a)); // sort by live ROS value
-  }, [players, sideAPlayerIds, sideBPlayerIds, sideCPlayerIds, playerSearchQuery, playerPosFilter, settings]);
+  }, [players, sideAPlayerIds, sideBPlayerIds, sideCPlayerIds, playerSearchQuery, playerPosFilter, calcROSValue]);
 
 
   const handleAddPlayer = (side: 'A' | 'B' | 'C', playerId: string) => {
@@ -193,7 +199,7 @@ export const TradeAnalyzer: React.FC<TradeAnalyzerProps> = ({
       ...(topWR && topTE ? [{ label: `⚡ Top WR ⇄ Top TE`, a: [topWR], b: [topTE] }] : []),
       ...(topQB && topRB ? [{ label: `📈 Top QB ⇄ Top RB`, a: [topQB], b: [topRB] }] : []),
     ].filter(p => p.a.every(Boolean) && p.b.every(Boolean));
-  }, [players.length, myRoster, settings]);
+  }, [players, myRoster, settings]);
 
 
   return (

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Sparkles, 
   TrendingUp, 
@@ -131,9 +131,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isWeekDropdownOpen, setIsWeekDropdownOpen] = useState(false);
 
-  // Flattened tools list for easy lookup
-  const allTools = NAVIGATION_CATEGORIES.flatMap(cat => cat.tools);
-  const activeTool = allTools.find(t => t.id === activeTab) || allTools[0];
+  const activeCategory = useMemo(() => {
+    return NAVIGATION_CATEGORIES.find(cat => cat.tools.some(t => t.id === activeTab)) || NAVIGATION_CATEGORIES[0];
+  }, [activeTab]);
+
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<string | null>(null);
+  const currentCategoryTab = selectedCategoryTab ?? activeCategory.id;
+
+  const activeCategoryTools = useMemo(() => {
+    const cat = NAVIGATION_CATEGORIES.find(c => c.id === currentCategoryTab);
+    return cat ? cat.tools : activeCategory.tools;
+  }, [currentCategoryTab, activeCategory]);
 
   // Continuous loop of live ticker games
   const tickerGames = liveGames.length > 0 ? liveGames.concat(liveGames) : [];
@@ -449,104 +457,139 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* 3. Easy-To-Use Categorized Command Navigation Bar */}
-        <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between gap-4">
+        <div className="mt-3 pt-3 border-t border-slate-800 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           
-          {/* Active Tool Overview & "Explore All Modules" Mega Menu Button */}
-          <div className="relative">
-            <button
-              onClick={() => setIsMegaMenuOpen(!isMegaMenuOpen)}
-              className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-gradient-to-r from-indigo-950 via-slate-900 to-slate-900 border border-indigo-500/40 text-white hover:border-indigo-400 shadow-md text-xs font-bold cursor-pointer transition-all"
-            >
-              <LayoutGrid className="w-4 h-4 text-indigo-400" />
-              <span>Module: <strong className="text-amber-300 font-display">{activeTool.label}</strong></span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isMegaMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
+          {/* Category Switcher Tabs + Mega Menu */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar shrink-0">
+            {NAVIGATION_CATEGORIES.map(cat => {
+              const isCatActive = currentCategoryTab === cat.id;
+              const hasActiveTab = cat.tools.some(t => t.id === activeTab);
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => {
+                    setSelectedCategoryTab(cat.id);
+                    if (!hasActiveTab && cat.tools.length > 0) {
+                      setActiveTab(cat.tools[0].id);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                    isCatActive
+                      ? 'bg-slate-800/90 text-white border border-slate-600 shadow-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
+                  }`}
+                >
+                  <span>{cat.label}</span>
+                  {hasActiveTab && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                  )}
+                </button>
+              );
+            })}
 
-
-            {/* Mega Menu Dropdown */}
-            {isMegaMenuOpen && (
-              <div 
-                className="absolute left-0 top-12 z-50 w-[90vw] max-w-3xl rounded-3xl bg-[#0a0f22] border border-slate-700 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10"
-                onClick={(e) => e.stopPropagation()}
+            {/* "All 15 Tools" Mega Menu Button */}
+            <div className="relative">
+              <button
+                onClick={() => setIsMegaMenuOpen(!isMegaMenuOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white text-xs font-bold cursor-pointer transition-all shrink-0 ml-1"
               >
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div>
-                    <h3 className="font-bold text-white text-base font-display">Gridiron Intelligence Terminal Modules</h3>
-                    <p className="text-xs text-slate-400">Select any of the specialized modules grouped by workflow.</p>
-                  </div>
-                  <button 
-                    onClick={() => setIsMegaMenuOpen(false)}
-                    className="p-1.5 rounded-xl bg-slate-900 text-slate-400 hover:text-white border border-slate-800 text-xs cursor-pointer"
-                  >
-                    ✕ Close
-                  </button>
-                </div>
+                <LayoutGrid className="w-3.5 h-3.5 text-amber-400" />
+                <span>All 15</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isMegaMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {NAVIGATION_CATEGORIES.map(category => (
-                    <div key={category.id} className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2.5">
-                      <div className="text-xs font-mono font-bold uppercase text-slate-300 flex items-center justify-between">
-                        <span>{category.label}</span>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        {category.tools.map(tool => {
-                          const Icon = tool.icon;
-                          const isSelected = activeTab === tool.id;
-                          return (
-                            <button
-                              key={tool.id}
-                              onClick={() => {
-                                setActiveTab(tool.id);
-                                setIsMegaMenuOpen(false);
-                              }}
-                              className={`w-full p-2.5 rounded-xl flex items-center justify-between text-left transition-all cursor-pointer ${
-                                isSelected 
-                                  ? 'bg-emerald-500/20 text-white border border-emerald-500/40 shadow-sm' 
-                                  : 'text-slate-300 hover:bg-slate-900 border border-transparent'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5">
-                                <div className={`p-1.5 rounded-lg border ${isSelected ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
-                                  <Icon className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <div className="text-xs font-bold text-white">{tool.label}</div>
-                                  <div className="text-[10px] text-slate-400">{tool.desc}</div>
-                                </div>
-                              </div>
-
-                              <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-slate-900 text-slate-400 border border-slate-800">
-                                {tool.badge}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
+              {/* Mega Menu Dropdown */}
+              {isMegaMenuOpen && (
+                <div 
+                  className="absolute left-0 top-10 z-50 w-[90vw] max-w-3xl rounded-3xl bg-[#0a0f22] border border-slate-700 shadow-2xl p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/10"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div>
+                      <h3 className="font-bold text-white text-base font-display">Gridiron Intelligence Terminal Modules</h3>
+                      <p className="text-xs text-slate-400">Select any of the 15 specialized modules grouped by workflow.</p>
                     </div>
-                  ))}
+                    <button 
+                      onClick={() => setIsMegaMenuOpen(false)}
+                      className="p-1.5 rounded-xl bg-slate-900 text-slate-400 hover:text-white border border-slate-800 text-xs cursor-pointer"
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {NAVIGATION_CATEGORIES.map(category => (
+                      <div key={category.id} className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+                        <div className="text-xs font-mono font-bold uppercase text-slate-300 flex items-center justify-between">
+                          <span>{category.label}</span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {category.tools.map(tool => {
+                            const Icon = tool.icon;
+                            const isSelected = activeTab === tool.id;
+                            return (
+                              <button
+                                key={tool.id}
+                                onClick={() => {
+                                  setActiveTab(tool.id);
+                                  setIsMegaMenuOpen(false);
+                                }}
+                                className={`w-full p-2.5 rounded-xl flex items-center justify-between text-left transition-all cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-emerald-500/20 text-white border border-emerald-500/40 shadow-sm' 
+                                    : 'text-slate-300 hover:bg-slate-900 border border-transparent'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <div className={`p-1.5 rounded-lg border ${isSelected ? 'bg-emerald-500 text-slate-950 border-emerald-400' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                                    <Icon className="w-4 h-4" />
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-bold text-white">{tool.label}</div>
+                                    <div className="text-[10px] text-slate-400">{tool.desc}</div>
+                                  </div>
+                                </div>
+
+                                <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-slate-900 text-slate-400 border border-slate-800">
+                                  {tool.badge}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
-          {/* Quick-Access Top Category Hub Bar */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1 justify-end no-scrollbar scroll-smooth">
-            {allTools.slice(0, 8).map(tool => {
+          {/* Sub-Navigation: All Tools within Active Category */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 flex-1 lg:justify-end no-scrollbar scroll-smooth">
+            {activeCategoryTools.map(tool => {
               const Icon = tool.icon;
               const isActive = activeTab === tool.id;
               return (
                 <button
                   key={tool.id}
                   onClick={() => setActiveTab(tool.id)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-150 cursor-pointer ${
                     isActive
-                      ? 'bg-gradient-to-r from-amber-500/25 via-emerald-500/25 to-purple-500/25 text-white border border-amber-500/50 shadow-lg shadow-amber-500/10'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-slate-800/80'
+                      ? 'bg-gradient-to-r from-amber-500/25 via-emerald-500/25 to-purple-500/25 text-white border border-amber-500/50 shadow-md shadow-amber-500/10'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-900/90 border border-slate-800/80'
                   }`}
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-amber-400' : 'text-slate-400'}`} />
                   <span>{tool.label}</span>
+                  {tool.badge && (
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                      isActive ? 'bg-amber-400/20 text-amber-300' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {tool.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}

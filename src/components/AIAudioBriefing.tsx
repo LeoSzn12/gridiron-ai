@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { Player, LeagueSettings, AudioBriefingScript } from '../types';
 import { generateAudioBriefing } from '../services/aiEngine';
 import { 
@@ -19,7 +19,9 @@ export const AIAudioBriefing: React.FC<AIAudioBriefingProps> = ({
   players,
   settings,
 }) => {
-  const briefing: AudioBriefingScript = generateAudioBriefing(players, settings);
+  const briefing: AudioBriefingScript = useMemo(() => {
+    return generateAudioBriefing(players, settings);
+  }, [players, settings]);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState<number>(0);
   const [playbackRate, setPlaybackRate] = useState<number>(1.0);

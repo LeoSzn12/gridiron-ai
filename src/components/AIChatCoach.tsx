@@ -177,7 +177,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                   onChange={(e) => handleProviderChange(e.target.value as AIProvider)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs font-semibold focus:border-purple-500 focus:outline-none"
                 >
-                  <option value="openrouter">🌐 OpenRouter (Claude 3.5 Sonnet, GPT-4o, DeepSeek R1 - 1 Key for All)</option>
+                  <option value="openrouter">🌐 OpenRouter (DeepSeek V3, Claude 3.5 Sonnet, GPT-4o, DeepSeek R1 - 1 Key for All)</option>
                   <option value="anthropic">🧠 Anthropic Claude API (Direct Claude 3.5 Sonnet)</option>
                   <option value="openai">⚡ OpenAI API (Direct ChatGPT-4o / o3-mini)</option>
                   <option value="nvidia-nim">🚀 NVIDIA NIM (DeepSeek V4 Flash / GPU Cloud)</option>
@@ -237,23 +237,26 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                         if (!key) { setTestStatus('⚠️ Enter your sk-or-... key first.'); return; }
                         setTestStatus('🔄 Testing OpenRouter connection...');
                         try {
-                          const res = await fetch('/.netlify/functions/ai-chat', {
+                          const activeModel = configModel && !configModel.includes('v4-flash') ? configModel : 'deepseek/deepseek-chat';
+                          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${key}`,
+                              'HTTP-Referer': window.location.origin,
+                              'X-Title': 'Gridiron AI',
+                            },
                             body: JSON.stringify({
-                              prompt: 'Reply with exactly: OPENROUTER_OK',
-                              provider: 'openrouter',
-                              model: configModel || 'deepseek/deepseek-v4-flash-0731',
-                              apiKey: key,
-                              maxTokens: 16,
-                              temperature: 0,
+                              model: activeModel,
+                              messages: [{ role: 'user', content: 'Say OK' }],
+                              max_tokens: 16,
                             }),
                           });
                           const data = await res.json();
                           if (data.error) {
-                            setTestStatus(`❌ ${data.error}`);
+                            setTestStatus(`❌ ${data.error.message || JSON.stringify(data.error)}`);
                           } else {
-                            setTestStatus(`✅ OpenRouter connected! Model: ${configModel?.split('/').pop()}`);
+                            setTestStatus(`✅ OpenRouter connected! Model: ${activeModel.split('/').pop()}`);
                           }
                         } catch (err: any) {
                           setTestStatus(`❌ Connection failed: ${err.message}`);
@@ -268,7 +271,7 @@ export const AIChatCoach: React.FC<AIChatCoachProps> = ({
                     )}
                   </div>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    Enables DeepSeek V4 Flash, DeepSeek R1, Claude 3.5 Sonnet, GPT-4o, and Gemini with a single API key.
+                    Enables DeepSeek V3, DeepSeek R1, Claude 3.5 Sonnet, GPT-4o, and Gemini with a single API key.
                   </p>
                 </div>
               )}

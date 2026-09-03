@@ -4,7 +4,7 @@ import { Star } from 'lucide-react';
 
 interface PlayerAvatarProps {
   avatarUrl?: string;
-  name: string;
+  name?: string;
   position: PlayerPosition | string;
   team: string;
   isMyTeam?: boolean;
@@ -21,7 +21,7 @@ const SIZES = {
 
 export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
   avatarUrl,
-  name,
+  name = '',
   position,
   team,
   isMyTeam = false,
@@ -31,8 +31,10 @@ export const PlayerAvatar: React.FC<PlayerAvatarProps> = ({
   const [imgError, setImgError] = useState(false);
   const sizeConfig = SIZES[size];
 
-  const initials = name
+  const safeName = name || position || 'PL';
+  const initials = safeName
     .split(' ')
+    .filter(Boolean)
     .map(n => n[0])
     .join('')
     .slice(0, 2)

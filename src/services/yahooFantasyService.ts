@@ -126,6 +126,10 @@ export async function refreshYahooToken(
 }
 
 
+function yahooProxyUrl(targetUrl: string): string {
+  return `/api/yahoo-proxy?endpoint=${encodeURIComponent(targetUrl)}`;
+}
+
 /**
  * Fetch Current User's NFL Leagues from Yahoo Fantasy API
  */
@@ -133,7 +137,7 @@ export async function fetchYahooUserLeagues(accessToken: string): Promise<YahooU
   const url = `${YAHOO_BASE_API}/users;use_login=1/games;game_keys=nfl/leagues?format=json`;
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(yahooProxyUrl(url), {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
       },
@@ -171,7 +175,52 @@ export async function fetchYahooUserLeagues(accessToken: string): Promise<YahooU
 
     return leagues;
   } catch (err) {
-    console.warn('Failed to fetch Yahoo leagues directly via REST:', err);
+    console.warn('Failed to fetch Yahoo leagues via proxy:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch Current User's Teams from Yahoo Fantasy API
+ */
+export async function fetchYahooUserTeams(
+  accessToken: string
+): Promise<{ teamKey: string; name: string; leagueKey: string; logoUrl?: string }[]> {
+  const url = `${YAHOO_BASE_API}/users;use_login=1/games;game_keys=nfl/teams?format=json`;
+  try {
+    const res = await fetch(yahooProxyUrl(url), {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!res.ok) throw new Error(`Yahoo user teams fetch failed (${res.status})`);
+    const data = await res.json();
+    const teams: { teamKey: string; name: string; leagueKey: string; logoUrl?: string }[] = [];
+    const userObj = data?.fantasy_content?.users?.[0]?.user;
+    const gamesObj = userObj?.[1]?.games;
+    const game = gamesObj?.[0]?.game;
+    const teamsObj = game?.[1]?.teams;
+
+    if (Array.isArray(teamsObj)) {
+      teamsObj.forEach((t: any) => {
+        const teamInfo = t?.team?.[0];
+        if (Array.isArray(teamInfo)) {
+          const keyItem = teamInfo.find((x: any) => x?.team_key);
+          const nameItem = teamInfo.find((x: any) => x?.name);
+          const logoItem = teamInfo.find((x: any) => x?.team_logos);
+          if (keyItem?.team_key && nameItem?.name) {
+            const leagueKey = keyItem.team_key.split('.t.')[0];
+            teams.push({
+              teamKey: keyItem.team_key,
+              name: nameItem.name,
+              leagueKey,
+              logoUrl: logoItem?.team_logos?.[0]?.team_logo?.url,
+            });
+          }
+        }
+      });
+    }
+    return teams;
+  } catch (err) {
+    console.warn('Failed to fetch Yahoo user teams:', err);
     return [];
   }
 }
@@ -187,7 +236,7 @@ export async function fetchYahooTeamRoster(
 ): Promise<{ playerName: string; position: string; status: string; teamAbbr: string }[]> {
   const url = `https://fantasysports.yahooapis.com/fantasy/v2/team/${teamKey}/roster?format=json`;
   try {
-    const res = await fetch(url, {
+    const res = await fetch(yahooProxyUrl(url), {
       headers: { 'Authorization': `Bearer ${accessToken}` },
     });
     if (!res.ok) throw new Error(`Yahoo roster fetch failed (${res.status})`);
@@ -216,6 +265,7 @@ export async function fetchYahooTeamRoster(
   }
 }
 
+
 /**
  * Fetch the current week's matchup for the user's team.
  * Returns both the user's team info and their opponent's team info.
@@ -236,7 +286,7 @@ export async function fetchYahooCurrentMatchup(
   const weekParam = week ? `;week=${week}` : '';
   const url = `https://fantasysports.yahooapis.com/fantasy/v2/team/${teamKey}/matchups${weekParam}?format=json`;
   try {
-    const res = await fetch(url, {
+    const res = await fetch(yahooProxyUrl(url), {
       headers: { 'Authorization': `Bearer ${accessToken}` },
     });
     if (!res.ok) return null;
@@ -342,7 +392,8 @@ export async function autoSyncYahooRoster(
  */
 
 // Helper to normalize names for resilient matching
-function normalizePlayerName(name: string): string {
+function normalizePlayerName(name?: string): string {
+  if (!name) return '';
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
@@ -357,66 +408,34 @@ export function parseYahooRosterText(
   rawText: string,
   allPlayers: Player[]
 ): YahooFastImportResult {
-  if (!rawText.trim()) {
+  if (!rawText || !rawText.trim()) {
     return {
       matchedPlayers: [],
       unmatchedNames: [],
       totalParsed: 0,
-      sourceText: rawText,
+      sourceText: rawText || '',
     };
   }
 
-  // Pre-index existing players by normalized name, alias, and ID
-  const playerIndex = new Map<string, Player>();
-  allPlayers.forEach(p => {
-    playerIndex.set(p.id.toLowerCase(), p);
-    playerIndex.set(normalizePlayerName(p.name), p);
-    // Add variations (e.g. Josh Allen -> joshallen)
-    const tokens = p.name.toLowerCase().split(' ');
+  // Pre-index existing players by normalized name, alias, and ID (supporting multiple candidates per name)
+  const playerIndex = new Map<string, Player[]>();
+  const addIndex = (key: string, player: Player) => {
+    if (!key) return;
+    const arr = playerIndex.get(key) || [];
+    arr.push(player);
+    playerIndex.set(key, arr);
+  };
+
+  (allPlayers || []).forEach(p => {
+    if (!p || !p.name) return;
+    if (p.id) addIndex(p.id.toLowerCase(), p);
+    addIndex(normalizePlayerName(p.name), p);
+    if (p.sleeperId) addIndex(p.sleeperId.toLowerCase(), p);
+    const tokens = p.name.toLowerCase().split(' ').filter(t => t.length > 1);
     if (tokens.length >= 2) {
-      playerIndex.set(`${tokens[0][0]}${tokens[tokens.length - 1]}`, p); // jallen
+      addIndex(`${tokens[0][0]}${tokens[tokens.length - 1]}`, p); // jallen
     }
   });
-
-  // Team Defense alias mappings
-  const defMappings: Record<string, string> = {
-    'bal': 'bal-def',
-    'baltimore': 'bal-def',
-    'ravens': 'bal-def',
-    'sf': 'sf-def',
-    'sanfrancisco': 'sf-def',
-    '49ers': 'sf-def',
-    'niners': 'sf-def',
-    'kc': 'kc-def',
-    'kansascity': 'kc-def',
-    'chiefs': 'kc-def',
-    'pit': 'pit-def',
-    'pittsburgh': 'pit-def',
-    'steelers': 'pit-def',
-    'buf': 'buf-def',
-    'buffalo': 'buf-def',
-    'bills': 'buf-def',
-    'det': 'det-def',
-    'detroit': 'det-def',
-    'lions': 'det-def',
-    'dal': 'dal-def',
-    'dallas': 'dal-def',
-    'cowboys': 'dal-def',
-    'cle': 'cle-def',
-    'cleveland': 'cle-def',
-    'browns': 'cle-def',
-    'hou': 'hou-def',
-    'houston': 'hou-def',
-    'texans': 'hou-def',
-    'phi': 'phi-def',
-    'philadelphia': 'phi-def',
-    'eagles': 'phi-def',
-    'nyj': 'nyj-def',
-    'jets': 'nyj-def',
-    'min': 'min-def',
-    'minnesota': 'min-def',
-    'vikings': 'min-def',
-  };
 
   const matchedSet = new Set<string>();
   const matchedPlayers: Player[] = [];
@@ -434,31 +453,43 @@ export function parseYahooRosterText(
       continue;
     }
 
-    // Try extracting player candidate
-    // Format 1: "Lamar Jackson Bal - QB" or "Saquon Barkley Phi - RB"
-    // Format 2: "Justin Jefferson (Min - WR)"
-    // Format 3: "1. Lamar Jackson (QB)"
-    // Format 4: "Baltimore Ravens DEF"
-    
+    // Extract clues from raw line for position and team
+    const posMatch = line.match(/\b(QB|RB|WR|TE|K|DEF|D\/ST|DL|DE|DT|LB|DB|CB|S|FS|SS|OLB|ILB)\b/i);
+    const rawPosHint = posMatch ? posMatch[1].toUpperCase() : undefined;
+    const isDefHint = rawPosHint === 'DEF' || rawPosHint === 'D/ST' || /\b(DEF|D\/ST|Defense)\b/i.test(line);
+
+    const teamMatch = line.match(/\b(BAL|BUF|KC|PHI|SF|DET|HOU|MIN|GB|DAL|CIN|TB|MIA|WAS|LAC|DEN|LV|NYJ|CLE|CHI|IND|JAX|ARI|SEA|ATL|NO|LAR|CAR|TEN|NE|NYG|PIT)\b/i);
+    const teamHint = teamMatch ? teamMatch[1].toUpperCase() : undefined;
+
     // Clean Yahoo metadata noise
     let cleanCandidate = line
       .replace(/^[0-9]+[.\-)]\s*/, '') // Remove numbers e.g. "1. "
-      .replace(/\s+(vs|@)\s+[A-Za-z]+.*$/i, '') // Remove opponent matchup info e.g. "@ KC Sun 1:00"
+      .replace(/\s+(vs|@)\s+[A-Za-z]+.*$/i, '') // Remove opponent matchup info
       .replace(/\s+(Sun|Mon|Thu|Sat)\s+[0-9]+:[0-9]+.*$/i, '') // Remove game times
       .replace(/[[({][A-Za-z0-9\s\-_/]+[)\]}]/g, ' ') // Remove parenthesis details
       .replace(/-(?:\s*[A-Z]{1,3}\s*-\s*[A-Z]{1,3})/, ' ') // Remove "- Bal - QB"
       .replace(/\b(QB|RB|WR|TE|K|DEF|D\/ST|DL|LB|DB|IDP|BN|IR|W\/R\/T|Q\/W\/R\/T|FLEX)\b/gi, ' ') // Remove pos
       .replace(/\b(BAL|BUF|KC|PHI|SF|DET|HOU|MIN|GB|DAL|CIN|TB|MIA|WAS|LAC|DEN|LV|NYJ|CLE|CHI|IND|JAX|ARI|SEA|ATL|NO|LAR|CAR|TEN|NE|NYG|PIT|FA)\b/gi, ' ') // Remove team abbr
       .replace(/\s+/g, ' ')
+      .replace(/^[-\s,.:]+|[-\s,.:]+$/g, '') // Strip leading/trailing punctuation including trailing hyphen
       .trim();
 
-    if (!cleanCandidate || cleanCandidate.length < 3) continue;
+    if (!cleanCandidate || cleanCandidate.length < 2) continue;
 
     const norm = normalizePlayerName(cleanCandidate);
 
-    // Check defense mapping
-    if (defMappings[norm]) {
-      const defPlayer = allPlayers.find(p => p.id === defMappings[norm]);
+    // 1. Check Team Defense
+    if (isDefHint || norm.includes('def') || /^(baltimore|sanfrancisco|kansascity|buffalo|denver|pittsburgh|chicago|detroit|philadelphia|houston|dallas|cleveland)/.test(norm)) {
+      const defPlayer = allPlayers.find(p => {
+        if (!p || p.position !== 'DEF' || !p.name) return false;
+        const normP = normalizePlayerName(p.name);
+        if (!normP) return false;
+        if (teamHint && p.team === teamHint) return true;
+        if (normP === norm) return true;
+        if (normP.length >= 3 && norm.length >= 3 && (normP.includes(norm) || norm.includes(normP))) return true;
+        if (p.id && norm.length >= 3 && p.id.toLowerCase().includes(norm)) return true;
+        return false;
+      });
       if (defPlayer && !matchedSet.has(defPlayer.id)) {
         matchedSet.add(defPlayer.id);
         matchedPlayers.push(defPlayer);
@@ -466,25 +497,43 @@ export function parseYahooRosterText(
       }
     }
 
-    // Direct match
-    if (playerIndex.has(norm)) {
-      const found = playerIndex.get(norm)!;
-      if (!matchedSet.has(found.id)) {
-        matchedSet.add(found.id);
-        matchedPlayers.push(found);
+    // 2. Direct / Indexed Match with Disambiguation
+    const candidates = playerIndex.get(norm);
+    if (candidates && candidates.length > 0) {
+      // Pick best candidate using posHint, teamHint, and offensive priority
+      let best = candidates.find(c => {
+        if (!c) return false;
+        if (rawPosHint && (c.position === rawPosHint || (['DL','DE','DT'].includes(rawPosHint) && c.position === 'DL'))) return true;
+        if (teamHint && c.team === teamHint) return true;
+        return false;
+      });
+
+      if (!best) {
+        // Disambiguate namesakes (e.g. WR Justin Jefferson vs LB Justin Jefferson)
+        best = [...candidates].sort((a, b) => {
+          const aOff = ['QB', 'RB', 'WR', 'TE'].includes(a.position) ? 100 : 0;
+          const bOff = ['QB', 'RB', 'WR', 'TE'].includes(b.position) ? 100 : 0;
+          return (bOff + (b.tradeValue || 0)) - (aOff + (a.tradeValue || 0));
+        })[0];
+      }
+
+      if (best && !matchedSet.has(best.id)) {
+        matchedSet.add(best.id);
+        matchedPlayers.push(best);
         continue;
       }
     }
 
-    // Partial / Fuzzy match across all players
+    // 3. Partial / Fuzzy match across all players
     const match = allPlayers.find(p => {
+      if (!p || !p.name) return false;
       const pNorm = normalizePlayerName(p.name);
       if (pNorm === norm) return true;
       if (pNorm.includes(norm) || norm.includes(pNorm)) return true;
       
       // First & Last Name check
       const candidateTokens = cleanCandidate.toLowerCase().split(' ').filter(t => t.length > 1);
-      const playerTokens = p.name.toLowerCase().split(' ').filter(t => t.length > 1);
+      const playerTokens = (p.name || '').toLowerCase().split(' ').filter(t => t.length > 1);
       if (candidateTokens.length >= 2 && playerTokens.length >= 2) {
         const firstMatch = playerTokens[0].startsWith(candidateTokens[0]) || candidateTokens[0].startsWith(playerTokens[0]);
         const lastMatch = playerTokens[playerTokens.length - 1] === candidateTokens[candidateTokens.length - 1];
@@ -503,7 +552,7 @@ export function parseYahooRosterText(
   }
 
   return {
-    matchedPlayers,
+    matchedPlayers: matchedPlayers.filter(p => p && p.id && p.name),
     unmatchedNames: Array.from(new Set(unmatchedNames)),
     totalParsed: matchedPlayers.length + unmatchedNames.length,
     sourceText: rawText,

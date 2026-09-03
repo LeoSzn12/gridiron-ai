@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import type { Player, LeagueSettings } from '../types';
 import { 
   parseYahooRosterText, 
@@ -7,6 +7,8 @@ import {
   getYahooAuthorizationUrl, 
   exchangeYahooAuthCode,
   fetchYahooUserLeagues,
+  fetchYahooUserTeams,
+  fetchYahooTeamRoster,
   type YahooAuthConfig
 } from '../services/yahooFantasyService';
 import { GlassPanel, PositionBadge, PlayerAvatar } from './ui';
@@ -49,12 +51,7 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
   onImportOpponentRoster,
   onImportWaiverTargets,
 }) => {
-  const [activeTab, setActiveTab] = useState<'paste' | 'oauth'>(() => {
-    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('code')) {
-      return 'oauth';
-    }
-    return 'paste';
-  });
+  const [activeTab, setActiveTab] = useState<'paste' | 'oauth'>('paste');
   
   // Fast Paste State
   const [pastedText, setPastedText] = useState<string>('');
@@ -65,46 +62,84 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [oauthStatusMessage, setOauthStatusMessage] = useState<string | null>(null);
   const [userLeagues, setUserLeagues] = useState<any[]>([]);
+  const [userTeams, setUserTeams] = useState<any[]>([]);
 
-  // Auto-detect OAuth authorization code in URL on redirect
+  const getEffectiveRedirectUri = useCallback(() => {
+    return authConfig.redirectUri?.trim() || `${window.location.origin}/`;
+  }, [authConfig.redirectUri]);
+
+  const handleExchangeCode = useCallback(async (code: string) => {
+    if (!authConfig.clientId || !authConfig.clientSecret) {
+      setOauthStatusMessage('Missing Client ID or Client Secret to complete token exchange.');
+      return;
+    }
+    setIsAuthenticating(true);
+    setOauthStatusMessage('Detected Yahoo Authorization code! Exchanging for access token...');
+    const redirectUri = getEffectiveRedirectUri();
+    try {
+      const tokens = await exchangeYahooAuthCode(code, authConfig.clientId, authConfig.clientSecret, redirectUri);
+      const updatedConfig: YahooAuthConfig = {
+        ...authConfig,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        tokenExpiresAt: Date.now() + (tokens.expiresIn * 1000),
+        isConnected: true,
+      };
+      setAuthConfig(updatedConfig);
+      saveYahooAuthConfig(updatedConfig);
+      setOauthStatusMessage('Successfully authenticated with Yahoo! Fetching your active NFL leagues & teams...');
+
+      if (typeof window !== 'undefined' && window.history) {
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+      }
+
+      const [leagues, teams] = await Promise.all([
+        fetchYahooUserLeagues(tokens.accessToken),
+        fetchYahooUserTeams(tokens.accessToken)
+      ]);
+      setUserLeagues(leagues);
+      setUserTeams(teams);
+      setOauthStatusMessage(`Successfully connected! Found ${leagues.length} leagues and ${teams.length} teams.`);
+    } catch (err: any) {
+      setOauthStatusMessage(`OAuth token exchange notice: ${err.message}`);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, [authConfig, getEffectiveRedirectUri]);
+
+  // Auto-detect OAuth authorization code in URL or via popup postMessage
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
-    if (!code || !authConfig.clientId || !authConfig.clientSecret) return;
 
-    const timer = setTimeout(() => {
-      setIsAuthenticating(true);
-      setOauthStatusMessage('Detected Yahoo Authorization code! Exchanging for access token...');
-      const redirectUri = window.location.origin;
-      exchangeYahooAuthCode(code, authConfig.clientId, authConfig.clientSecret, redirectUri)
-        .then(async (tokens) => {
-          const updatedConfig: YahooAuthConfig = {
-            ...authConfig,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            tokenExpiresAt: Date.now() + (tokens.expiresIn * 1000),
-            isConnected: true,
-          };
-          setAuthConfig(updatedConfig);
-          saveYahooAuthConfig(updatedConfig);
-          setOauthStatusMessage('Successfully authenticated with Yahoo! Fetching your active NFL leagues...');
-          
-          window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-          
-          const leagues = await fetchYahooUserLeagues(tokens.accessToken);
-          setUserLeagues(leagues);
-        })
-        .catch((err) => {
-          setOauthStatusMessage(`OAuth token notice: ${err.message}`);
-        })
-        .finally(() => {
-          setIsAuthenticating(false);
-        });
-    }, 0);
+    // If running in popup, post code to opener and close
+    if (code && window.opener && window.opener !== window) {
+      try {
+        window.opener.postMessage({ type: 'YAHOO_OAUTH_CODE', code }, window.location.origin);
+        window.close();
+        return;
+      } catch {
+        // fallback
+      }
+    }
 
-    return () => clearTimeout(timer);
-  }, [authConfig]);
+    if (code && authConfig.clientId && authConfig.clientSecret) {
+      const timer = setTimeout(() => handleExchangeCode(code), 0);
+      return () => clearTimeout(timer);
+    }
+
+    // Listen for code from popup window
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.type === 'YAHOO_OAUTH_CODE' && event.data?.code) {
+        handleExchangeCode(event.data.code);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [authConfig.clientId, authConfig.clientSecret, handleExchangeCode]);
 
   // Parse pasted text in real time
   const parsedResult = useMemo(() => {
@@ -211,15 +246,56 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
     }
     setIsAuthenticating(true);
     try {
-      const leagues = await fetchYahooUserLeagues(authConfig.accessToken);
+      const [leagues, teams] = await Promise.all([
+        fetchYahooUserLeagues(authConfig.accessToken),
+        fetchYahooUserTeams(authConfig.accessToken)
+      ]);
       setUserLeagues(leagues);
+      setUserTeams(teams);
       if (leagues.length === 0) {
         setOauthStatusMessage('No active NFL leagues found for this Yahoo account.');
       } else {
-        setOauthStatusMessage(`Successfully retrieved ${leagues.length} Yahoo fantasy leagues!`);
+        setOauthStatusMessage(`Successfully retrieved ${leagues.length} leagues and ${teams.length} teams!`);
       }
     } catch {
       setOauthStatusMessage('Failed to fetch Yahoo leagues. Check your access token.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleImportYahooTeam = async (leagueKey: string, teamKey: string, teamName: string) => {
+    if (!authConfig.accessToken) return;
+    setIsAuthenticating(true);
+    setOauthStatusMessage(`Fetching live roster for "${teamName}"...`);
+    try {
+      const rosterPlayers = await fetchYahooTeamRoster(authConfig.accessToken, leagueKey, teamKey);
+      if (rosterPlayers.length === 0) {
+        setOauthStatusMessage(`No players found in Yahoo team roster for "${teamName}".`);
+        return;
+      }
+
+      const rosterText = rosterPlayers.map(p => `${p.playerName} ${p.teamAbbr} - ${p.position}`).join('\n');
+      const parsed = parseYahooRosterText(rosterText, allPlayers);
+      if (parsed.matchedPlayers.length > 0) {
+        const ids = parsed.matchedPlayers.map(p => p.id);
+        onImportMyRoster(ids, teamName);
+
+        const updated = {
+          ...authConfig,
+          selectedLeagueKey: leagueKey,
+          selectedTeamKey: teamKey,
+        };
+        setAuthConfig(updated);
+        saveYahooAuthConfig(updated);
+
+        triggerConfetti();
+        setOauthStatusMessage(`✅ Successfully imported ${parsed.matchedPlayers.length} players from "${teamName}" into your Starting Lineup!`);
+      } else {
+        setOauthStatusMessage(`Warning: None of the ${rosterPlayers.length} players could be matched to the live player database.`);
+      }
+    } catch (err: any) {
+      setOauthStatusMessage(`Roster import error: ${err.message}`);
     } finally {
       setIsAuthenticating(false);
     }
@@ -511,13 +587,13 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="https://localhost:5173/"
-                    value={authConfig.redirectUri || 'https://localhost:5173/'}
+                    placeholder="http://localhost:5173/"
+                    value={authConfig.redirectUri || (typeof window !== 'undefined' ? `${window.location.origin}/` : 'http://localhost:5173/')}
                     onChange={(e) => setAuthConfig(prev => ({ ...prev, redirectUri: e.target.value }))}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
                   />
                   <p className="text-[11px] text-slate-400 mt-1 font-mono">
-                    Ensure this matches the Redirect URI you set in the Yahoo Developer App (e.g. <code className="text-purple-300">https://localhost:5173/</code>).
+                    Ensure this matches the Redirect URI you set in the Yahoo Developer App (e.g. <code className="text-purple-300">{typeof window !== 'undefined' ? `${window.location.origin}/` : 'http://localhost:5173/'}</code>).
                   </p>
                 </div>
               </div>
@@ -562,33 +638,98 @@ export const YahooConnectModal: React.FC<YahooConnectModalProps> = ({
               {/* User Leagues Display */}
               {userLeagues.length > 0 && (
                 <div className="space-y-3 pt-4 border-t border-slate-800">
-                  <div className="text-xs font-mono font-bold text-slate-300 uppercase">
-                    Your Connected Yahoo Leagues:
+                  <div className="text-xs font-mono font-bold text-slate-300 uppercase flex items-center justify-between">
+                    <span>Your Connected Yahoo Leagues & Teams ({userLeagues.length}):</span>
+                    <span className="text-[11px] text-emerald-400 font-normal">Click Import to load team into Gridiron AI</span>
                   </div>
-                  <div className="space-y-2">
-                    {userLeagues.map((league) => (
-                      <div
-                        key={league.league_key}
-                        className="p-3.5 rounded-2xl bg-slate-900/90 border border-purple-500/30 flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="text-sm font-bold text-white font-display">{league.name}</div>
-                          <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                            {league.num_teams} Teams • Season {league.season} • Key: {league.league_key}
-                          </div>
-                        </div>
+                  <div className="space-y-3">
+                    {userLeagues.map((league) => {
+                      const matchingTeams = userTeams.filter(t => t.leagueKey === league.league_key);
+                      const isConnectedLeague = authConfig.selectedLeagueKey === league.league_key;
 
-                        <button
-                          onClick={() => {
-                            setOauthStatusMessage(`Selected league: ${league.name}`);
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 text-xs font-bold font-mono cursor-pointer transition-all flex items-center gap-1"
+                      return (
+                        <div
+                          key={league.league_key}
+                          className={`p-4 rounded-2xl border transition-all ${
+                            isConnectedLeague 
+                              ? 'bg-purple-950/30 border-purple-500/60 ring-1 ring-purple-500/40' 
+                              : 'bg-slate-900/90 border-purple-500/30'
+                          }`}
                         >
-                          <span>Select Team</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold text-white font-display">{league.name}</span>
+                                {isConnectedLeague && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    ACTIVE LEAGUE
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                                {league.num_teams} Teams • Season {league.season} • Key: {league.league_key}
+                              </div>
+                            </div>
+
+                            {matchingTeams.length === 0 && (
+                              <button
+                                onClick={() => handleImportYahooTeam(league.league_key, `${league.league_key}.t.1`, league.name)}
+                                disabled={isAuthenticating}
+                                className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold font-mono cursor-pointer transition-all flex items-center gap-1.5 shadow-md shadow-purple-600/20"
+                              >
+                                <span>Import Team 1</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* List of user teams in this league */}
+                          {matchingTeams.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
+                              <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                                Your Teams in this League:
+                              </div>
+                              {matchingTeams.map(team => {
+                                const isCurrentTeam = authConfig.selectedTeamKey === team.teamKey;
+                                return (
+                                  <div
+                                    key={team.teamKey}
+                                    className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between"
+                                  >
+                                    <div className="flex items-center gap-2.5">
+                                      {team.logoUrl ? (
+                                        <img src={team.logoUrl} alt={team.name} className="w-7 h-7 rounded-lg object-cover" />
+                                      ) : (
+                                        <div className="w-7 h-7 rounded-lg bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-[10px] font-bold text-purple-300">
+                                          {team.name.charAt(0)}
+                                        </div>
+                                      )}
+                                      <div>
+                                        <div className="text-xs font-bold text-white">{team.name}</div>
+                                        <div className="text-[10px] font-mono text-slate-500">{team.teamKey}</div>
+                                      </div>
+                                    </div>
+
+                                    <button
+                                      onClick={() => handleImportYahooTeam(league.league_key, team.teamKey, team.name)}
+                                      disabled={isAuthenticating}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono cursor-pointer transition-all flex items-center gap-1.5 ${
+                                        isCurrentTeam
+                                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
+                                          : 'bg-purple-600 hover:bg-purple-500 text-white shadow-sm'
+                                      }`}
+                                    >
+                                      <Zap className="w-3 h-3" />
+                                      <span>{isCurrentTeam ? 'Re-Sync Roster' : 'Import Roster'}</span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

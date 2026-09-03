@@ -10,7 +10,7 @@ export default defineConfig({
     {
       name: 'ai-chat-proxy',
       configureServer(server) {
-        server.middlewares.use('/api/ai-chat', async (req, res) => {
+        const aiChatHandler = async (req: any, res: any) => {
           if (req.method === 'OPTIONS') {
             res.writeHead(204, {
               'Access-Control-Allow-Origin': '*',
@@ -28,7 +28,7 @@ export default defineConfig({
           }
 
           let bodyStr = '';
-          req.on('data', chunk => { bodyStr += chunk; });
+          req.on('data', (chunk: any) => { bodyStr += chunk; });
           req.on('end', async () => {
             try {
               const body = JSON.parse(bodyStr || '{}');
@@ -64,7 +64,7 @@ export default defineConfig({
                 authHeader = `Bearer ${key.trim()}`;
               } else if (provider === 'nvidia-nim') {
                 targetUrl = 'https://integrate.api.nvidia.com/v1/chat/completions';
-                const key = apiKey || process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY || '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';
+                const key = apiKey || process.env.NVIDIA_API_KEY || process.env.VITE_NVIDIA_API_KEY || '';
                 authHeader = `Bearer ${key.trim()}`;
               } else if (provider === 'anthropic') {
                 const key = apiKey || process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY || '';
@@ -98,8 +98,12 @@ export default defineConfig({
                 return;
               }
 
+              const targetModel = model && !model.includes('v4-flash') 
+                ? model 
+                : (provider === 'openrouter' ? 'deepseek/deepseek-chat' : model);
+
               const payload = {
-                model,
+                model: targetModel,
                 messages,
                 temperature,
                 max_tokens: maxTokens,
@@ -141,10 +145,140 @@ export default defineConfig({
                 provider
               }));
             } catch (err: any) {
+              const causeMsg = err.cause?.message || (err.cause ? String(err.cause) : '');
               res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }));
+              res.end(JSON.stringify({ error: err.message || 'Internal Server Error', cause: causeMsg }));
             }
           });
+        };
+
+        server.middlewares.use('/api/ai-chat', aiChatHandler);
+        server.middlewares.use('/.netlify/functions/ai-chat', aiChatHandler);
+
+        // Yahoo OAuth Token Exchange Middleware
+        server.middlewares.use('/api/yahoo-oauth', async (req, res) => {
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'POST, OPTIONS',
+              'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            });
+            res.end();
+            return;
+          }
+
+          if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Method not allowed' }));
+            return;
+          }
+
+          let bodyStr = '';
+          req.on('data', (chunk: any) => { bodyStr += chunk; });
+          req.on('end', async () => {
+            try {
+              const body = JSON.parse(bodyStr || '{}');
+              const { clientId, clientSecret, code, redirectUri, refreshToken, grantType = 'authorization_code' } = body;
+
+              if (!clientId || !clientSecret) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'clientId and clientSecret are required' }));
+                return;
+              }
+
+              const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+              const params = new URLSearchParams();
+
+              if (grantType === 'refresh_token') {
+                if (!refreshToken) {
+                  res.writeHead(400, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ error: 'refreshToken required' }));
+                  return;
+                }
+                params.set('grant_type', 'refresh_token');
+                params.set('refresh_token', refreshToken);
+              } else {
+                if (!code || !redirectUri) {
+                  res.writeHead(400, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ error: 'code and redirectUri required' }));
+                  return;
+                }
+                params.set('grant_type', 'authorization_code');
+                params.set('code', code);
+                params.set('redirect_uri', redirectUri);
+              }
+
+              const tokenRes = await fetch('https://api.login.yahoo.com/oauth2/get_token', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Basic ${credentials}`,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: params.toString(),
+              });
+
+              const responseText = await tokenRes.text();
+              res.writeHead(tokenRes.status, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+              });
+              res.end(responseText);
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: `Server error: ${err.message}` }));
+            }
+          });
+        });
+
+        // Yahoo Fantasy REST API CORS proxy
+        server.middlewares.use('/api/yahoo-proxy', async (req, res) => {
+          if (req.method === 'OPTIONS') {
+            res.writeHead(204, {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+              'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Yahoo-Endpoint',
+            });
+            res.end();
+            return;
+          }
+
+          const authHeader = req.headers['authorization'];
+          if (!authHeader) {
+            res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'Authorization header required' }));
+            return;
+          }
+
+          const parsedUrl = new URL(req.url || '', 'http://localhost:5173');
+          const endpoint = parsedUrl.searchParams.get('endpoint') || (req.headers['x-yahoo-endpoint'] as string);
+
+          if (!endpoint) {
+            res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: 'endpoint query param required' }));
+            return;
+          }
+
+          const targetUrl = endpoint.startsWith('http') ? endpoint : `https://fantasysports.yahooapis.com${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+
+          try {
+            const yahooRes = await fetch(targetUrl, {
+              method: req.method === 'POST' ? 'POST' : 'GET',
+              headers: {
+                'Authorization': authHeader as string,
+                'Accept': 'application/json',
+              },
+            });
+
+            const responseText = await yahooRes.text();
+            res.writeHead(yahooRes.status, {
+              'Content-Type': yahooRes.headers.get('content-type') || 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            });
+            res.end(responseText);
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify({ error: `Yahoo proxy error: ${err.message}` }));
+          }
         });
       }
     }

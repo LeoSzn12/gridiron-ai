@@ -208,35 +208,50 @@ export async function fetchSleeperNFLState(): Promise<{ week: number; season: st
 
 // 4. Update Database with Real Live Weather & NFL Odds
 // Uses game-location stadium: home team's venue for accurate weather.
+// Pre-fetches in batch by unique stadium (~16 venues) to prevent connection socket exhaustion.
 export async function syncLivePlayerData(players: Player[] = PLAYERS_DATABASE): Promise<Player[]> {
-  // Cache weather by stadium to avoid duplicate API calls for same venue
+  // Collect unique stadiums needed across active players
+  const stadiumsNeeded = new Set<string>();
+  for (const player of players) {
+    const gameStadiumTeam = player.isHome ? player.team : player.opponent.replace(/^(vs |@ )/, '');
+    const stadiumKey = gameStadiumTeam || player.team;
+    if (stadiumKey && STADIUM_COORDINATES[stadiumKey]) {
+      stadiumsNeeded.add(stadiumKey);
+    }
+  }
+
+  // Pre-fetch weather once per unique venue in parallel
   const weatherCache = new Map<string, Partial<PlayerWeather> | null>();
-
-  const updatedPlayers = await Promise.all(
-    players.map(async (player) => {
-      // Determine the game-location stadium team abbreviation:
-      // - Home games: use the player's own team
-      // - Away games: use the opponent's team (that's where the game is played)
-      const gameStadiumTeam = player.isHome ? player.team : player.opponent.replace(/^(vs |@ )/, '');
-      const stadiumKey = gameStadiumTeam || player.team;
-
-      if (!weatherCache.has(stadiumKey)) {
-        weatherCache.set(stadiumKey, await fetchLiveStadiumWeather(stadiumKey));
+  const venues = Array.from(stadiumsNeeded);
+  await Promise.all(
+    venues.map(async (stadiumKey) => {
+      try {
+        const weather = await fetchLiveStadiumWeather(stadiumKey);
+        weatherCache.set(stadiumKey, weather);
+      } catch (err) {
+        console.warn(`[Weather] Failed to fetch weather for venue ${stadiumKey}:`, err);
+        weatherCache.set(stadiumKey, null);
       }
-
-      const weatherUpdate = weatherCache.get(stadiumKey);
-      if (weatherUpdate) {
-        return {
-          ...player,
-          weather: {
-            ...player.weather,
-            ...weatherUpdate,
-          },
-        };
-      }
-      return player;
     })
   );
+
+  // Map onto all players synchronously with 0 network overhead
+  const updatedPlayers = players.map((player) => {
+    const gameStadiumTeam = player.isHome ? player.team : player.opponent.replace(/^(vs |@ )/, '');
+    const stadiumKey = gameStadiumTeam || player.team;
+    const weatherUpdate = weatherCache.get(stadiumKey);
+    if (weatherUpdate) {
+      return {
+        ...player,
+        weather: {
+          ...player.weather,
+          ...weatherUpdate,
+        },
+      };
+    }
+    return player;
+  });
+
   return updatedPlayers;
 }
 
@@ -516,15 +531,23 @@ export async function buildLivePlayersDatabase(
       }
     }
 
-    // Fantasy-relevant positions
-    const FANTASY_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB']);
+    // Fantasy-relevant positions (including all IDP defensive positions)
+    const FANTASY_POSITIONS = new Set([
+      'QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB',
+      'DE', 'DT', 'NT', 'OLB', 'ILB', 'MLB', 'CB', 'SS', 'FS', 'S'
+    ]);
 
     // Build index of existing static pool by id and name for merging
     const existingById = new Map<string, Player>();
     const existingByName = new Map<string, Player>();
+    const existingByNameAndPos = new Map<string, Player>();
     existingPool.forEach(p => {
       existingById.set(p.id, p);
-      existingByName.set(p.name.toLowerCase().replace(/[^a-z0-9]/g, ''), p);
+      const norm = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      existingByNameAndPos.set(`${norm}_${p.position}`, p);
+      if (!existingByName.has(norm) || (p.tradeValue || 0) > (existingByName.get(norm)?.tradeValue || 0)) {
+        existingByName.set(norm, p);
+      }
     });
 
     const DOME_TEAMS = new Set(['DAL', 'DET', 'IND', 'LV', 'LA', 'LAR', 'LAC', 'MIN', 'NO', 'ARI', 'ATL', 'HOU']);
@@ -552,7 +575,12 @@ export async function buildLivePlayersDatabase(
     const seenIds = new Set<string>();
 
     Object.values(sleeperPlayers).forEach((raw) => {
-      if (!raw.player_id || !raw.full_name) return;
+      // Support team defenses where Sleeper only provides first_name / last_name or position DEF
+      const rawFullName = raw.full_name || 
+        (raw.first_name && raw.last_name ? `${raw.first_name} ${raw.last_name}` : 
+        (raw.position === 'DEF' && raw.team ? `${raw.team} DEF` : ''));
+
+      if (!raw.player_id || !rawFullName) return;
       if (!raw.team || raw.status === 'Inactive') return;
 
       const pos = raw.position || raw.fantasy_positions?.[0] || '';
@@ -568,17 +596,23 @@ export async function buildLivePlayersDatabase(
       const avatar = `https://sleepercdn.com/content/nfl/players/thumb/${raw.player_id}.jpg`;
 
       // Check if we have enriched static data to merge
-      const normName = raw.full_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normName = rawFullName.toLowerCase().replace(/[^a-z0-9]/g, '');
       let existing = existingById.get(raw.player_id);
       
       if (!existing) {
-        // Only match by name if the position roughly matches (Offense vs Defense)
-        const nameMatch = existingByName.get(normName);
-        if (nameMatch) {
-          const isOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(posTyped);
-          const existingIsOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(nameMatch.position);
-          if (isOffense === existingIsOffense) {
-            existing = nameMatch;
+        // First try matching by exact name + mapped position (e.g. Justin Jefferson WR vs Justin Jefferson LB)
+        const exactMatch = existingByNameAndPos.get(`${normName}_${posTyped}`);
+        if (exactMatch) {
+          existing = exactMatch;
+        } else {
+          // Fallback name match only if offense vs defense aligned
+          const nameMatch = existingByName.get(normName);
+          if (nameMatch) {
+            const isOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(posTyped);
+            const existingIsOffense = ['QB', 'RB', 'WR', 'TE', 'K'].includes(nameMatch.position);
+            if (isOffense === existingIsOffense) {
+              existing = nameMatch;
+            }
           }
         }
       }
@@ -595,10 +629,11 @@ export async function buildLivePlayersDatabase(
       const stadium = STADIUM_COORDINATES[team];
 
       if (existing) {
-        // Merge: keep all rich static data but overlay live fields
+        // Merge: keep all rich static data, PRESERVE curated ID for roster & duel mapping, overlay live fields
         liveBuilt.push({
           ...existing,
-          id: raw.player_id, // Use real live ID to avoid duplicates
+          id: existing.id, // Preserve curated ID
+          sleeperId: raw.player_id,
           position: posTyped, // Use real live position
           team: team, // Use real live team
           injuryStatus,
@@ -623,7 +658,7 @@ export async function buildLivePlayersDatabase(
 
         liveBuilt.push({
           id: raw.player_id,
-          name: raw.full_name,
+          name: rawFullName || raw.player_id,
           team,
           position: posTyped,
           jerseyNumber: 0,
@@ -697,8 +732,16 @@ export async function buildLivePlayersDatabase(
             redZoneTendency: 'Balanced Mixed',
           },
           recentGames: [],
-          aiAnalysisSummary: `${raw.full_name} — live Sleeper data. ${injuryStatus !== 'HEALTHY' ? `⚠️ ${injuryStatus}` : 'Active.'}`,
+          aiAnalysisSummary: `${rawFullName || raw.full_name || raw.player_id} — live Sleeper data. ${injuryStatus !== 'HEALTHY' ? `⚠️ ${injuryStatus}` : 'Active.'}`,
         });
+      }
+    });
+
+    // Ensure 100% of curated static pool players and defenses are preserved
+    const builtIds = new Set(liveBuilt.map(p => p.id));
+    existingPool.forEach(p => {
+      if (!builtIds.has(p.id)) {
+        liveBuilt.push(p);
       }
     });
 
